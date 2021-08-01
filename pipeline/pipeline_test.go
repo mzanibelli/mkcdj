@@ -1,6 +1,15 @@
 package pipeline_test
 
-import "testing"
+import (
+	"mkcdj/pipeline"
+	"testing"
+)
+
+func TestCheck(t *testing.T) {
+	if err := pipeline.Check(); err != nil {
+		t.Error(err)
+	}
+}
 
 const skipMessage = "this test requires real audio files to be executed"
 

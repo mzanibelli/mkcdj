@@ -19,8 +19,13 @@ func main() {
 }
 
 func run(args ...string) error {
+	if err := pipeline.Check(); err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	switch {
 	case len(args) < 2:
 		return usage()

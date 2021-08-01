@@ -9,6 +9,18 @@ import (
 
 // Disclaimer: this file hides all the bad things delegated to obscure shell commands.
 
+var required = []string{"ffmpeg", "sox", "grep", "sh", "bpm"}
+
+// Check returns an error if a dependency is missing.
+func Check() error {
+	for _, path := range required {
+		if _, err := exec.LookPath(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Analyze is a shell command to perform BPM analysis for a given BPM range.
 func Analyze(min, max string) func(context.Context) *exec.Cmd {
 	// Convert the standard input to mono raw PCM data (32 bits, float, little
