@@ -37,6 +37,7 @@ func TestAnalyze(t *testing.T) {
 	SUT := mkcdj.New(
 		mkcdj.WithRepository(repo),
 		mkcdj.WithAnalyzeFunc(stubAnalyze),
+		mkcdj.WithInspectFunc(stubInspect),
 	)
 
 	ctx := context.Background()
@@ -61,6 +62,7 @@ func TestAnalyze(t *testing.T) {
 	assert(t, fd.Name(), tracks[0].Path)
 	assert(t, "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03", tracks[0].Hash)
 	assert(t, "100", fmt.Sprint(tracks[0].BPM))
+	assert(t, "1", fmt.Sprintf("%.0f", tracks[0].Quality))
 }
 
 func TestCompile(t *testing.T) {
@@ -141,4 +143,5 @@ func (r *fakeRepository) Load(v interface{}) error { return json.NewDecoder(r.bu
 func (r *fakeRepository) Save(v interface{}) error { return json.NewEncoder(r.buf).Encode(v) }
 
 func stubAnalyze(context.Context) *exec.Cmd { return exec.Command("echo", "100") }
+func stubInspect(context.Context) *exec.Cmd { return exec.Command("echo", "22000  10.0") }
 func stubConvert(context.Context) *exec.Cmd { return exec.Command("echo", "converted") }

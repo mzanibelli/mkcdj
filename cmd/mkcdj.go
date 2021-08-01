@@ -49,8 +49,11 @@ func analyze(ctx context.Context, preset, path string) error {
 	if preset != "default" && err != nil {
 		return err
 	}
+
 	min, max := p.Range()
-	m := mkcdj.New(repo(), mkcdj.WithAnalyzeFunc(pipeline.Analyze(min, max)))
+	a, i := pipeline.Analyze(min, max), pipeline.Inspect()
+	m := mkcdj.New(repo(), mkcdj.WithAnalyzeFunc(a), mkcdj.WithInspectFunc(i))
+
 	return m.Analyze(ctx, path)
 }
 

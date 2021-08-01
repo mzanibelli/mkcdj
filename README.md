@@ -1,10 +1,10 @@
 # MkCDJ
 
-A tool to manage an audio playlist with BPM analysis.
+A tool to manage an audio playlist with BPM and quality analysis.
 
 ## Dependencies
 
-You need to have `ffmpeg(1)`, and [bpm-tools](https://www.pogo.org.uk/~mark/bpm-tools) installed.
+You need to have `ffmpeg(1)`, `sox(1)` and [bpm-tools](https://www.pogo.org.uk/~mark/bpm-tools) installed.
 
 Ultimately, native implementations or low-level bindings would replace shell commands.
 
@@ -12,7 +12,7 @@ Ultimately, native implementations or low-level bindings would replace shell com
 
 - Run `mkcdj analyze PRESET PATH` to add a track to the collection
 - Run `mkcdj compile PATH` to export all files to the given directory after converting them to a suitable format
-- Run `mkcdj list` to preview the tracklist
+- Run `mkcdj list` to preview the tracklist, with BPM and quality score
 - Run `mkcdj files` to print absolute file paths (for scripting)
 - Run `mkcdj prune` to remove lost files from the current playlist
 
@@ -28,3 +28,10 @@ A preset is a shorthand to hint the BPM detection. Each preset limits the detect
 For example, the `dnb` (Drum & Bass) preset limits the detection from 165 to 180 BPM.
 
 [Check the source to see the supported presets](https://github.com/mzanibelli/mkcdj/blob/master/mkcdj.go) or use `default` to get a wide range (1-200).
+
+## Quality
+
+The quality score is computed from the average RMS gain over 20Khz relatively to the same measurement made over 16Khz.
+Thus, MP3 files having a cutoff at 20Khz will have a much lower score than their WAV counterpart.
+
+The threshold used to output the quality warning is arbitrary and based on my manual tests.
