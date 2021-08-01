@@ -10,8 +10,9 @@ Ultimately, native implementations or low-level bindings would replace shell com
 ## Usage
 
 - Run `mkcdj analyze PRESET PATH` to add a track to the collection
-- Run `mkcdj list` to preview the tracklist, with BPM and quality score
 - Run `mkcdj compile PATH` to export all files to the given directory after converting them to a suitable format
+- Run `mkcdj list` to preview the tracklist, with BPM and quality score
+- Run `mkcdj prune` to remove lost files from the current playlist
 
 ## Configuration
 
