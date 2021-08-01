@@ -444,8 +444,10 @@ func convert(ctx context.Context, src, dst string, p Pipeline) error {
 	return run(ctx, p, in, out)
 }
 
+const pipelineTimeout = 30 * time.Second
+
 func run(parent context.Context, p Pipeline, stdin io.Reader, stdout io.Writer) error {
-	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	ctx, cancel := context.WithTimeout(parent, pipelineTimeout)
 	defer cancel()
 
 	cmd := p.Command(ctx)
