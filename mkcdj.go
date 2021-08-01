@@ -268,31 +268,12 @@ func (list *Playlist) Compile(ctx context.Context, path string) error {
 
 	wg.Add(numWorkers + 1)
 
-	// This returns the full path of the destination WAV file according to the
-	// previously created destination directory as well as a given filepath.
-	mkPath := func(t Track) string {
-		var subdir string
-
-		p, err := PresetFromBPM(t.BPM)
-		if err != nil {
-			subdir = "default"
-		} else {
-			min, max := p.Range()
-			subdir = fmt.Sprintf("%s - %s", min, max)
-		}
-
-		base, ext := filepath.Base(t.Path), filepath.Ext(t.Path)
-		name := base[:len(base)-len(ext)]
-
-		return filepath.Join(dir, subdir, fmt.Sprintf("%.0f - %s.wav", t.BPM, name))
-	}
-
 	// Start the workers that will handle file conversions.
 	for i := 0; i < numWorkers; i++ {
 		go func() {
 			defer wg.Done()
 			for t := range input {
-				sink <- convert(ctx, t.Path, mkPath(t), list.convert)
+				sink <- convert(ctx, t.Path, rename(dir, t), list.convert)
 			}
 		}()
 	}
@@ -318,6 +299,24 @@ func (list *Playlist) Compile(ctx context.Context, path string) error {
 	}
 
 	return nil
+}
+
+func rename(dir string, t Track) string {
+	var subdir string
+
+	switch p, err := PresetFromBPM(t.BPM); {
+	case err == nil:
+		min, max := p.Range()
+		subdir = fmt.Sprintf("%s - %s", min, max)
+	default:
+		subdir = "default"
+	}
+
+	base, ext := filepath.Base(t.Path), filepath.Ext(t.Path)
+	name := base[:len(base)-len(ext)]
+	path := fmt.Sprintf("%.0f - %s.wav", t.BPM, name)
+
+	return filepath.Join(dir, subdir, path)
 }
 
 func track(ctx context.Context, path string, p Pipeline) (Track, error) {
