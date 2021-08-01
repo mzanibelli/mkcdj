@@ -28,3 +28,12 @@ func Convert() func(context.Context) *exec.Cmd {
 			"-f", "wav", "-ac", "2", "-ar", "44100", "-acodec", "pcm_s16le", "pipe:1")
 	}
 }
+
+// Inspect is a shell command to dump gains for a set of frequencies all along an audio file.
+func Inspect() func(context.Context) *exec.Cmd {
+	const cmd = "ffmpeg -v quiet -i pipe:0 -f f32le -ac 1 -ar 44100 pipe:1 | sox -q -V0 -b 32 -r 44100 -c 1 -e floating-point -t raw - -n stat -freq -rms 2>&1 | grep -E '[^ ]+  [^ ]+'"
+	// Convert to floating point audio and pass it to sox.
+	return func(ctx context.Context) *exec.Cmd {
+		return exec.Command("sh", "-c", cmd)
+	}
+}

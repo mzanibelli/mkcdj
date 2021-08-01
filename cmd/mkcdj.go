@@ -40,9 +40,11 @@ func analyze(ctx context.Context, preset, path string) error {
 	}
 
 	min, max := p.Range()
-	f := pipeline.Analyze(min, max)
+	a, i := pipeline.Analyze(min, max), pipeline.Inspect()
 
-	return mkcdj.New(repo(), mkcdj.WithAnalyzeFunc(f)).Analyze(ctx, path)
+	m := mkcdj.New(repo(), mkcdj.WithAnalyzeFunc(a), mkcdj.WithInspectFunc(i))
+
+	return m.Analyze(ctx, path)
 }
 
 func compile(ctx context.Context, dest string) error {

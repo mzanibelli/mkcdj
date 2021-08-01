@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"mkcdj/quality"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,14 +20,15 @@ import (
 
 // Track is an audio track.
 type Track struct {
-	Path string  `json:"path"`
-	Hash string  `json:"hash"`
-	BPM  float64 `json:"bpm"`
+	Path    string  `json:"path"`
+	Hash    string  `json:"hash"`
+	BPM     float64 `json:"bpm"`
+	Quality float64 `json:"quality"`
 }
 
 // String implements fmt.Stringer for Track.
 func (t Track) String() string {
-	return fmt.Sprintf("%0.f - %s", t.BPM, filepath.Base(t.Path))
+	return filepath.Base(t.Path)
 }
 
 // Preset is a BPM range preset.
@@ -48,7 +50,7 @@ var (
 // analyze pipeline.
 func (p Preset) Range() (string, string) {
 	min, max := math.Round(p.Min), math.Round(p.Max)
-	return fmt.Sprintf("%0.f", min), fmt.Sprintf("%0.f", max)
+	return fmt.Sprintf("%.0f", min), fmt.Sprintf("%.0f", max)
 }
 
 var presets = map[string]Preset{
@@ -75,7 +77,7 @@ func PresetFromBPM(bpm float64) (Preset, error) {
 			return p, nil
 		}
 	}
-	return Default, fmt.Errorf("unknown BPM range for value: %2.f", bpm)
+	return Default, fmt.Errorf("unknown BPM range for value: %.2f", bpm)
 }
 
 // Playlist is a DJ playlist.
@@ -83,6 +85,7 @@ type Playlist struct {
 	collection Repository
 	analyze    Pipeline
 	convert    Pipeline
+	inspect    Pipeline
 }
 
 // Repository holds the track collection.
@@ -137,6 +140,13 @@ func WithConvertFunc(f func(context.Context) *exec.Cmd) Option {
 	}
 }
 
+// WithInspectFunc configures the shell command used to get the max cutoff frequency.
+func WithInspectFunc(f func(context.Context) *exec.Cmd) Option {
+	return func(a *Playlist) {
+		a.inspect = PipelineFunc(f)
+	}
+}
+
 // List pretty-prints the current playlist.
 func (a *Playlist) List(out io.Writer) error {
 	tracks := make([]Track, 0)
@@ -152,17 +162,7 @@ func (a *Playlist) List(out io.Writer) error {
 	})
 
 	for _, t := range tracks {
-		// Check if the file is found.
-		var status string
-		if _, err := os.Stat(t.Path); err == nil {
-			status = "[ok]"
-		} else {
-			status = "[ko]"
-		}
-
-		// Print out a line for the track.
-		line := fmt.Sprintf("%s %s", status, t)
-		if _, err := fmt.Fprintln(out, line); err != nil {
+		if err := print(out, t); err != nil {
 			return err
 		}
 	}
@@ -170,9 +170,8 @@ func (a *Playlist) List(out io.Writer) error {
 	return nil
 }
 
-// Analyze computes the BPM of an audio file.
-// It analyses the file at the given path passing min and max as BPM boundaries
-// to the external program.
+// Analyze computes the BPM of an audio file and and estimate score of its
+// quality based on the highest frequencies.
 func (a *Playlist) Analyze(ctx context.Context, path string) error {
 	tracks := make([]Track, 0)
 
@@ -187,44 +186,11 @@ func (a *Playlist) Analyze(ctx context.Context, path string) error {
 		return err
 	}
 
-	wg := new(sync.WaitGroup)
-	wg.Add(2)
-
-	hc, bc, ec := make(chan string, 1), make(chan float64, 1), make(chan error, 2)
-
-	// Hash the file. This will be used to avoid duplicates in the collection as
-	// well as speed up some operations.
-	go func() {
-		defer wg.Done()
-		hash, err := hash(abs)
-		hc <- hash
-		ec <- err
-	}()
-
-	// Compute the BPM analysis from the given shell pipeline. Convert the command
-	// output to a float64 value.
-	go func() {
-		defer wg.Done()
-		bpm, err := analyze(ctx, abs, a.analyze)
-		bc <- bpm
-		ec <- err
-	}()
-
-	wg.Wait()
-
-	close(hc)
-	close(bc)
-	close(ec)
-
-	// Handle any error that occurred during hash or BPM analysis steps.
-	for err := range ec {
-		if err != nil {
-			return err
-		}
+	// Compute the Track.
+	track, err := track(ctx, abs, a.analyze, a.inspect)
+	if err != nil {
+		return err
 	}
-
-	// Create the Track struct from freshly computed data.
-	track := Track{Path: abs, Hash: <-hc, BPM: <-bc}
 
 	// Check if the same track was already in our collection and update it with the
 	// new version if it is found.
@@ -285,7 +251,7 @@ func (a *Playlist) Compile(ctx context.Context, path string) error {
 		base, ext := filepath.Base(t.Path), filepath.Ext(t.Path)
 		name := base[:len(base)-len(ext)]
 
-		return filepath.Join(dir, subdir, fmt.Sprintf("%0.f - %s.wav", t.BPM, name))
+		return filepath.Join(dir, subdir, fmt.Sprintf("%.0f - %s.wav", t.BPM, name))
 	}
 
 	// Start the workers that will handle file conversions.
@@ -319,6 +285,57 @@ func (a *Playlist) Compile(ctx context.Context, path string) error {
 	}
 
 	return nil
+}
+
+func track(ctx context.Context, path string, a, i Pipeline) (Track, error) {
+	wg := new(sync.WaitGroup)
+	wg.Add(3)
+
+	hc, bc, qc := make(chan string, 1), make(chan float64, 1), make(chan float64, 1)
+	sink := make(chan error, 3)
+
+	// Hash the file. This will be used to avoid duplicates in the collection as
+	// well as speed up some operations.
+	go func() {
+		defer wg.Done()
+		hash, err := hash(path)
+		hc <- hash
+		sink <- err
+	}()
+
+	// Compute the BPM analysis from the given shell pipeline. Convert the command
+	// output to a float64 value.
+	go func() {
+		defer wg.Done()
+		bpm, err := analyze(ctx, path, a)
+		bc <- bpm
+		sink <- err
+	}()
+
+	// Compute the quality score of the track.
+	go func() {
+		defer wg.Done()
+		avg, err := inspect(ctx, path, i)
+		qc <- avg
+		sink <- err
+	}()
+
+	wg.Wait()
+
+	close(hc)
+	close(bc)
+	close(qc)
+
+	close(sink)
+
+	// Handle any error that occurred during hash or BPM analysis steps.
+	for err := range sink {
+		if err != nil {
+			return Track{}, err
+		}
+	}
+
+	return Track{Path: path, Hash: <-hc, BPM: <-bc, Quality: <-qc}, nil
 }
 
 func hash(path string) (string, error) {
@@ -357,6 +374,27 @@ func analyze(ctx context.Context, path string, p Pipeline) (float64, error) {
 	return res, nil
 }
 
+func inspect(ctx context.Context, path string, p Pipeline) (float64, error) {
+	in, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer in.Close()
+
+	buf := bytes.NewBuffer(nil)
+
+	if err := run(ctx, p, in, buf); err != nil {
+		return 0, err
+	}
+
+	score, err := quality.Parse(buf)
+	if err != nil {
+		return 0, err
+	}
+
+	return score, nil
+}
+
 func convert(ctx context.Context, src, dst string, p Pipeline) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
@@ -386,4 +424,27 @@ func run(parent context.Context, p Pipeline, stdin io.Reader, stdout io.Writer) 
 	cmd.Stdin, cmd.Stdout = stdin, stdout
 
 	return cmd.Run()
+}
+
+func print(out io.Writer, t Track) error {
+	line := fmt.Sprintf("[%s] [%.0f] %s", status(t), t.BPM, t)
+	_, err := fmt.Fprintln(out, line)
+	return err
+}
+
+const (
+	good = "good"
+	warn = "warn"
+	fail = "fail"
+)
+
+func status(t Track) string {
+	switch _, err := os.Stat(t.Path); {
+	case err != nil:
+		return fail
+	case t.Quality < quality.Threshold:
+		return warn
+	default:
+		return good
+	}
 }
