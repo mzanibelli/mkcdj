@@ -48,6 +48,6 @@ func Inspect() func(context.Context) *exec.Cmd {
 	const cmd = "ffmpeg -v quiet -i pipe:0 -f f32le -ac 1 -ar 44100 pipe:1 | sox -q -V0 -b 32 -r 44100 -c 1 -e floating-point -t raw - -n stat -freq -rms 2>&1 | grep -E '[^ ]+  [^ ]+'"
 	// Convert to floating point audio and pass it to sox.
 	return func(ctx context.Context) *exec.Cmd {
-		return exec.Command("sh", "-c", cmd)
+		return exec.CommandContext(ctx, "sh", "-c", cmd)
 	}
 }
