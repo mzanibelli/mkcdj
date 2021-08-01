@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"mkcdj"
 	"mkcdj/pipeline"
 	"mkcdj/repository"
@@ -21,12 +22,12 @@ func run(args ...string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	switch {
-	case len(args) < 2:
-		return usage()
 	case args[1] == "analyze" && len(args) == 4:
 		return analyze(ctx, args[2], args[3])
 	case args[1] == "compile" && len(args) == 3:
 		return compile(ctx, args[2])
+	case args[1] == "list" && len(args) == 2:
+		return list(ctx, os.Stdout)
 	default:
 		return usage()
 	}
@@ -46,6 +47,10 @@ func analyze(ctx context.Context, preset, path string) error {
 
 func compile(ctx context.Context, dest string) error {
 	return mkcdj.New(repo(), mkcdj.WithConvertFunc(pipeline.Convert())).Compile(ctx, dest)
+}
+
+func list(ctx context.Context, out io.Writer) error {
+	return mkcdj.New(repo()).List(out)
 }
 
 const help string = `invalid parameters

@@ -6,11 +6,11 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +22,11 @@ type Track struct {
 	Path string  `json:"path"`
 	Hash string  `json:"hash"`
 	BPM  float64 `json:"bpm"`
+}
+
+// String implements fmt.Stringer for Track.
+func (t Track) String() string {
+	return fmt.Sprintf("%0.f - %s", t.BPM, filepath.Base(t.Path))
 }
 
 // Preset is a BPM range preset.
@@ -130,6 +135,39 @@ func WithConvertFunc(f func(context.Context) *exec.Cmd) Option {
 	return func(a *Playlist) {
 		a.convert = PipelineFunc(f)
 	}
+}
+
+// List pretty-prints the current playlist.
+func (a *Playlist) List(out io.Writer) error {
+	tracks := make([]Track, 0)
+
+	// Load the existing collection.
+	if err := a.collection.Load(&tracks); err != nil {
+		return err
+	}
+
+	// Sort collection by BPM.
+	sort.SliceStable(tracks, func(i, j int) bool {
+		return tracks[i].BPM < tracks[j].BPM
+	})
+
+	for _, t := range tracks {
+		// Check if the file is found.
+		var status string
+		if _, err := os.Stat(t.Path); err == nil {
+			status = "[ok]"
+		} else {
+			status = "[ko]"
+		}
+
+		// Print out a line for the track.
+		line := fmt.Sprintf("%s %s", status, t)
+		if _, err := fmt.Fprintln(out, line); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Analyze computes the BPM of an audio file.
@@ -256,7 +294,6 @@ func (a *Playlist) Compile(ctx context.Context, path string) error {
 			defer wg.Done()
 			for t := range input {
 				sink <- convert(ctx, t.Path, mkPath(t), a.convert)
-				log.Println("convert:", t.Path)
 			}
 		}()
 	}
