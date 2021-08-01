@@ -240,7 +240,7 @@ func (a *Playlist) Compile(ctx context.Context, path string) error {
 		var subdir string
 
 		p, err := PresetFromBPM(t.BPM)
-		if p == Default || err != nil {
+		if err != nil {
 			subdir = "default"
 		} else {
 			min, max := p.Range()
@@ -424,6 +424,10 @@ func convert(ctx context.Context, src, dst string, p Pipeline) error {
 		return err
 	}
 	defer in.Close()
+
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		return fmt.Errorf("about to overwrite: %s", dst)
+	}
 
 	out, err := os.Create(dst)
 	if err != nil {
