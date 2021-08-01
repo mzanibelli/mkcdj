@@ -11,3 +11,7 @@ func TestAnalyze(t *testing.T) {
 func TestConvert(t *testing.T) {
 	t.Skip(skipMessage)
 }
+
+func TestInspect(t *testing.T) {
+	t.Skip(skipMessage)
+}

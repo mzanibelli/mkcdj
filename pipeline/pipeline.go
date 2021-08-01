@@ -27,8 +27,7 @@ func Analyze(min, max string) func(context.Context) *exec.Cmd {
 func Convert() func(context.Context) *exec.Cmd {
 	// Convert the standard intput to a Pioneer-compatible 16 bits stereo WAV at 44110Hz.
 	return func(ctx context.Context) *exec.Cmd {
-		return exec.CommandContext(ctx, "ffmpeg", "-v", "quiet", "-i", "pipe:0",
-			"-f", "wav", "-ac", "2", "-ar", "44100", "-acodec", "pcm_s16le", "pipe:1")
+		return exec.CommandContext(ctx, "ffmpeg", "-v", "quiet", "-i", "pipe:0", "-f", "wav", "-ac", "2", "-ar", "44100", "-acodec", "pcm_s16le", "pipe:1")
 	}
 }
 

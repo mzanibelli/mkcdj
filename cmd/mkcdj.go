@@ -44,9 +44,7 @@ func analyze(ctx context.Context, preset, path string) error {
 	}
 
 	min, max := p.Range()
-
 	a, i := pipeline.Analyze(min, max), pipeline.Inspect()
-
 	m := mkcdj.New(repo(), mkcdj.WithAnalyzeFunc(a), mkcdj.WithInspectFunc(i))
 
 	return m.Analyze(ctx, path)
@@ -61,7 +59,7 @@ func list(ctx context.Context, out io.Writer) error {
 }
 
 func prune(ctx context.Context) error {
-	return mkcdj.New(repo()).Prune(ctx)
+	return mkcdj.New(repo()).Prune()
 }
 
 const help string = `invalid parameters

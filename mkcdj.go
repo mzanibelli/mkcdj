@@ -46,13 +46,7 @@ var (
 	Default = Preset{1, 200}
 )
 
-// Range returns the BPM range as used for parameter interpolation in the
-// analyze pipeline.
-func (p Preset) Range() (string, string) {
-	min, max := math.Round(p.Min), math.Round(p.Max)
-	return fmt.Sprintf("%.0f", min), fmt.Sprintf("%.0f", max)
-}
-
+// Internal list used for lookup.
 var presets = map[string]Preset{
 	"dnb":     DNB,
 	"jungle":  Jungle,
@@ -61,7 +55,14 @@ var presets = map[string]Preset{
 	"house":   House,
 }
 
-// PresetFromName returns a BPM range preset from its name.
+// Range returns the BPM range as used for parameter interpolation in the
+// analyze pipeline.
+func (p Preset) Range() (string, string) {
+	min, max := math.Round(p.Min), math.Round(p.Max)
+	return fmt.Sprintf("%.0f", min), fmt.Sprintf("%.0f", max)
+}
+
+// PresetFromName returns list BPM range preset from its name.
 func PresetFromName(name string) (Preset, error) {
 	if p, ok := presets[name]; ok {
 		return p, nil
@@ -108,11 +109,11 @@ func (f PipelineFunc) Command(ctx context.Context) *exec.Cmd {
 
 // New returns a new Playlist.
 func New(opts ...Option) *Playlist {
-	a := new(Playlist)
+	list := new(Playlist)
 	for _, opt := range opts {
-		opt(a)
+		opt(list)
 	}
-	return a
+	return list
 }
 
 // Option is an option of the BPM analyzer.
@@ -120,38 +121,38 @@ type Option func(*Playlist)
 
 // WithRepository configures the repository used to persist data.
 func WithRepository(r Repository) Option {
-	return func(a *Playlist) {
-		a.collection = r
+	return func(list *Playlist) {
+		list.collection = r
 	}
 }
 
 // WithAnalyzeFunc configures the shell command used to compute BPM data.
 func WithAnalyzeFunc(f func(context.Context) *exec.Cmd) Option {
-	return func(a *Playlist) {
-		a.analyze = PipelineFunc(f)
+	return func(list *Playlist) {
+		list.analyze = PipelineFunc(f)
 	}
 }
 
 // WithConvertFunc configures the shell command used to convert final files.
 func WithConvertFunc(f func(context.Context) *exec.Cmd) Option {
-	return func(a *Playlist) {
-		a.convert = PipelineFunc(f)
+	return func(list *Playlist) {
+		list.convert = PipelineFunc(f)
 	}
 }
 
 // WithInspectFunc configures the shell command used to get the max cutoff frequency.
 func WithInspectFunc(f func(context.Context) *exec.Cmd) Option {
-	return func(a *Playlist) {
-		a.inspect = PipelineFunc(f)
+	return func(list *Playlist) {
+		list.inspect = PipelineFunc(f)
 	}
 }
 
 // List pretty-prints the current playlist.
-func (a *Playlist) List(out io.Writer) error {
+func (list *Playlist) List(out io.Writer) error {
 	tracks := make([]Track, 0)
 
 	// Load the existing collection.
-	if err := a.collection.Load(&tracks); err != nil {
+	if err := list.collection.Load(&tracks); err != nil {
 		return err
 	}
 
@@ -169,13 +170,36 @@ func (a *Playlist) List(out io.Writer) error {
 	return nil
 }
 
-// Analyze computes the BPM of an audio file and and estimate score of its
-// quality based on the highest frequencies.
-func (a *Playlist) Analyze(ctx context.Context, path string) error {
+// Prune remove files that are not a their reported location anymore.
+// It is based on the status() function, so this could have more criteria in
+// the near future.
+func (list *Playlist) Prune() error {
 	tracks := make([]Track, 0)
 
 	// Load the existing collection.
-	if err := a.collection.Load(&tracks); err != nil {
+	if err := list.collection.Load(&tracks); err != nil {
+		return err
+	}
+
+	// Cleanup tracks with an error status (file not found...).
+	clean := make([]Track, 0)
+	for i := range tracks {
+		if status(tracks[i]) != fail {
+			clean = append(clean, tracks[i])
+		}
+	}
+
+	// Persist the final collection.
+	return list.collection.Save(&clean)
+}
+
+// Analyze computes the BPM of an audio file and and estimate score of its
+// quality based on the highest frequencies.
+func (list *Playlist) Analyze(ctx context.Context, path string) error {
+	tracks := make([]Track, 0)
+
+	// Load the existing collection.
+	if err := list.collection.Load(&tracks); err != nil {
 		return err
 	}
 
@@ -186,7 +210,7 @@ func (a *Playlist) Analyze(ctx context.Context, path string) error {
 	}
 
 	// Compute the Track.
-	track, err := track(ctx, abs, a.analyze, a.inspect)
+	track, err := track(ctx, abs, list.analyze, list.inspect)
 	if err != nil {
 		return err
 	}
@@ -208,14 +232,16 @@ func (a *Playlist) Analyze(ctx context.Context, path string) error {
 	}
 
 	// Persist the final collection.
-	return a.collection.Save(&tracks)
+	return list.collection.Save(&tracks)
 }
 
-func (a *Playlist) Compile(ctx context.Context, path string) error {
+// Compile converts all files to a common format and exports them in the given
+// directory classified by BPM.
+func (list *Playlist) Compile(ctx context.Context, path string) error {
 	tracks := make([]Track, 0)
 
 	// Load the existing collection.
-	if err := a.collection.Load(&tracks); err != nil {
+	if err := list.collection.Load(&tracks); err != nil {
 		return err
 	}
 
@@ -258,7 +284,7 @@ func (a *Playlist) Compile(ctx context.Context, path string) error {
 		go func() {
 			defer wg.Done()
 			for t := range input {
-				sink <- convert(ctx, t.Path, mkPath(t), a.convert)
+				sink <- convert(ctx, t.Path, mkPath(t), list.convert)
 			}
 		}()
 	}
@@ -335,26 +361,6 @@ func track(ctx context.Context, path string, a, i Pipeline) (Track, error) {
 	}
 
 	return Track{Path: path, Hash: <-hc, BPM: <-bc, Quality: <-qc}, nil
-}
-
-func (a *Playlist) Prune(ctx context.Context) error {
-	tracks := make([]Track, 0)
-
-	// Load the existing collection.
-	if err := a.collection.Load(&tracks); err != nil {
-		return err
-	}
-
-	// Cleanup tracks with an error status (file not found...).
-	clean := make([]Track, 0)
-	for i := range tracks {
-		if status(tracks[i]) != fail {
-			clean = append(clean, tracks[i])
-		}
-	}
-
-	// Persist the final collection.
-	return a.collection.Save(&clean)
 }
 
 func hash(path string) (string, error) {
