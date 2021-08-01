@@ -464,15 +464,23 @@ func print(out io.Writer, t Track) error {
 }
 
 const (
+	// Status strings.
 	good = "good"
 	warn = "warn"
 	fail = "fail"
+
+	// Lossless extensions.
+	wav  = ".wav"
+	flac = ".flac"
 )
 
 func status(t Track) string {
+	ext := filepath.Ext(t.Path)
 	switch _, err := os.Stat(t.Path); {
 	case err != nil:
 		return fail
+	case ext != wav && ext != flac:
+		return warn
 	case t.Quality < quality.Threshold:
 		return warn
 	default:
