@@ -22,12 +22,16 @@ func run(args ...string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	switch {
+	case len(args) < 2:
+		return usage()
 	case args[1] == "analyze" && len(args) == 4:
 		return analyze(ctx, args[2], args[3])
 	case args[1] == "compile" && len(args) == 3:
 		return compile(ctx, args[2])
 	case args[1] == "list" && len(args) == 2:
 		return list(ctx, os.Stdout)
+	case args[1] == "prune" && len(args) == 2:
+		return prune(ctx)
 	default:
 		return usage()
 	}
@@ -35,11 +39,12 @@ func run(args ...string) error {
 
 func analyze(ctx context.Context, preset, path string) error {
 	p, err := mkcdj.PresetFromName(preset)
-	if err != nil {
+	if preset != "default" && err != nil {
 		return err
 	}
 
 	min, max := p.Range()
+
 	a, i := pipeline.Analyze(min, max), pipeline.Inspect()
 
 	m := mkcdj.New(repo(), mkcdj.WithAnalyzeFunc(a), mkcdj.WithInspectFunc(i))
@@ -55,11 +60,17 @@ func list(ctx context.Context, out io.Writer) error {
 	return mkcdj.New(repo()).List(out)
 }
 
+func prune(ctx context.Context) error {
+	return mkcdj.New(repo()).Prune(ctx)
+}
+
 const help string = `invalid parameters
 
 Usage:
   mkcdj analyze PRESET AUDIO_FILE
-  mkcdj compile DEST_DIRECTORY`
+  mkcdj compile DEST_DIRECTORY
+  mkcdj list
+  mkcdj prune`
 
 func usage() error { return errors.New(help) }
 

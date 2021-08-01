@@ -39,11 +39,11 @@ type Preset struct {
 
 var (
 	DNB     = Preset{165, 179.99}
-	Jungle  = Preset{155, 164.99}
-	Dubstep = Preset{135, 144.99}
+	Jungle  = Preset{148, 164.99}
+	Dubstep = Preset{135, 147.99}
 	Garage  = Preset{128, 134.99}
 	House   = Preset{115, 127.99}
-	Default = Preset{80, 114.99}
+	Default = Preset{1, 200}
 )
 
 // Range returns the BPM range as used for parameter interpolation in the
@@ -59,7 +59,6 @@ var presets = map[string]Preset{
 	"dubstep": Dubstep,
 	"garage":  Garage,
 	"house":   House,
-	"default": Default,
 }
 
 // PresetFromName returns a BPM range preset from its name.
@@ -336,6 +335,26 @@ func track(ctx context.Context, path string, a, i Pipeline) (Track, error) {
 	}
 
 	return Track{Path: path, Hash: <-hc, BPM: <-bc, Quality: <-qc}, nil
+}
+
+func (a *Playlist) Prune(ctx context.Context) error {
+	tracks := make([]Track, 0)
+
+	// Load the existing collection.
+	if err := a.collection.Load(&tracks); err != nil {
+		return err
+	}
+
+	// Cleanup tracks with an error status (file not found...).
+	clean := make([]Track, 0)
+	for i := range tracks {
+		if status(tracks[i]) != fail {
+			clean = append(clean, tracks[i])
+		}
+	}
+
+	// Persist the final collection.
+	return a.collection.Save(&clean)
 }
 
 func hash(path string) (string, error) {
