@@ -1,3 +1,4 @@
+// Package pipeline contains the shell commands used to perform audio analysis.
 package pipeline
 
 import (
@@ -5,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 )
+
+// Disclaimer: this file hides all the bad things delegated to obscure shell commands.
 
 // Analyze is a shell command to perform BPM analysis for a given BPM range.
 func Analyze(min, max string) func(context.Context) *exec.Cmd {

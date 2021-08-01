@@ -2,6 +2,11 @@
 
 A tool to manage an audio playlist with BPM and quality analysis.
 
+## Dependencies
+
+You need to have `ffmpeg(1)`, `sox(1)` and `bpm-tools` installed.
+Ultimately, native implementations or low-level bindings would replace shell commands.
+
 ## Usage
 
 - Run `mkcdj analyze PRESET PATH` to add a track to the collection

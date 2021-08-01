@@ -1,3 +1,5 @@
+// Package quality computes a score based on the presence of high-end frequencies.
+// Is parses output from sox(1) freq module.
 package quality
 
 import (
