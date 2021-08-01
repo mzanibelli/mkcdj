@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"mkcdj/quality"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,10 +19,9 @@ import (
 
 // Track is an audio track.
 type Track struct {
-	Path    string  `json:"path"`
-	Hash    string  `json:"hash"`
-	BPM     float64 `json:"bpm"`
-	Quality float64 `json:"quality"`
+	Path string  `json:"path"`
+	Hash string  `json:"hash"`
+	BPM  float64 `json:"bpm"`
 }
 
 // String implements fmt.Stringer for Track.
@@ -85,7 +83,6 @@ type Playlist struct {
 	collection Repository
 	analyze    Pipeline
 	convert    Pipeline
-	inspect    Pipeline
 }
 
 // Repository holds the track collection.
@@ -137,13 +134,6 @@ func WithAnalyzeFunc(f func(context.Context) *exec.Cmd) Option {
 func WithConvertFunc(f func(context.Context) *exec.Cmd) Option {
 	return func(list *Playlist) {
 		list.convert = PipelineFunc(f)
-	}
-}
-
-// WithInspectFunc configures the shell command used to get the max cutoff frequency.
-func WithInspectFunc(f func(context.Context) *exec.Cmd) Option {
-	return func(list *Playlist) {
-		list.inspect = PipelineFunc(f)
 	}
 }
 
@@ -212,8 +202,7 @@ func (list *Playlist) Prune() error {
 	return list.collection.Save(&clean)
 }
 
-// Analyze computes the BPM of an audio file and and estimate score of its
-// quality based on the highest frequencies.
+// Analyze adds a track to the playlist and computes its BPM.
 func (list *Playlist) Analyze(ctx context.Context, path string) error {
 	tracks := make([]Track, 0)
 
@@ -229,7 +218,7 @@ func (list *Playlist) Analyze(ctx context.Context, path string) error {
 	}
 
 	// Compute the Track.
-	track, err := track(ctx, abs, list.analyze, list.inspect)
+	track, err := track(ctx, abs, list.analyze)
 	if err != nil {
 		return err
 	}
@@ -331,12 +320,12 @@ func (list *Playlist) Compile(ctx context.Context, path string) error {
 	return nil
 }
 
-func track(ctx context.Context, path string, a, i Pipeline) (Track, error) {
+func track(ctx context.Context, path string, p Pipeline) (Track, error) {
 	wg := new(sync.WaitGroup)
-	wg.Add(3)
+	wg.Add(2)
 
-	hc, bc, qc := make(chan string, 1), make(chan float64, 1), make(chan float64, 1)
-	sink := make(chan error, 3)
+	hc, bc := make(chan string, 1), make(chan float64, 1)
+	sink := make(chan error, 2)
 
 	// Hash the file. This will be used to avoid duplicates in the collection as
 	// well as speed up some operations.
@@ -351,16 +340,8 @@ func track(ctx context.Context, path string, a, i Pipeline) (Track, error) {
 	// output to a float64 value.
 	go func() {
 		defer wg.Done()
-		bpm, err := analyze(ctx, path, a)
+		bpm, err := analyze(ctx, path, p)
 		bc <- bpm
-		sink <- err
-	}()
-
-	// Compute the quality score of the track.
-	go func() {
-		defer wg.Done()
-		avg, err := inspect(ctx, path, i)
-		qc <- avg
 		sink <- err
 	}()
 
@@ -368,7 +349,6 @@ func track(ctx context.Context, path string, a, i Pipeline) (Track, error) {
 
 	close(hc)
 	close(bc)
-	close(qc)
 
 	close(sink)
 
@@ -379,7 +359,7 @@ func track(ctx context.Context, path string, a, i Pipeline) (Track, error) {
 		}
 	}
 
-	return Track{Path: path, Hash: <-hc, BPM: <-bc, Quality: <-qc}, nil
+	return Track{Path: path, Hash: <-hc, BPM: <-bc}, nil
 }
 
 func hash(path string) (string, error) {
@@ -416,27 +396,6 @@ func analyze(ctx context.Context, path string, p Pipeline) (float64, error) {
 	}
 
 	return res, nil
-}
-
-func inspect(ctx context.Context, path string, p Pipeline) (float64, error) {
-	in, err := os.Open(path)
-	if err != nil {
-		return 0, err
-	}
-	defer in.Close()
-
-	buf := bytes.NewBuffer(nil)
-
-	if err := run(ctx, p, in, buf); err != nil {
-		return 0, err
-	}
-
-	score, err := quality.Parse(buf)
-	if err != nil {
-		return 0, err
-	}
-
-	return score, nil
 }
 
 func convert(ctx context.Context, src, dst string, p Pipeline) error {
@@ -499,8 +458,6 @@ func status(t Track) string {
 	case err != nil:
 		return fail
 	case ext != wav && ext != flac:
-		return warn
-	case t.Quality < quality.Threshold:
 		return warn
 	default:
 		return good
