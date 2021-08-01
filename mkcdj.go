@@ -170,6 +170,25 @@ func (list *Playlist) List(out io.Writer) error {
 	return nil
 }
 
+// Files prints all the absolute file paths, one per line.
+func (list *Playlist) Files(out io.Writer) error {
+	tracks := make([]Track, 0)
+
+	// Load the existing collection.
+	if err := list.collection.Load(&tracks); err != nil {
+		return err
+	}
+
+	// Print all the files.
+	for _, t := range tracks {
+		if _, err := fmt.Fprintln(out, t.Path); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // Prune remove files that are not a their reported location anymore.
 // It is based on the status() function, so this could have more criteria in
 // the near future.

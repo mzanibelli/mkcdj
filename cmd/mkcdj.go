@@ -35,6 +35,8 @@ func run(args ...string) error {
 		return compile(ctx, args[2])
 	case args[1] == "list" && len(args) == 2:
 		return list(ctx, os.Stdout)
+	case args[1] == "files" && len(args) == 2:
+		return files(ctx, os.Stdout)
 	case args[1] == "prune" && len(args) == 2:
 		return prune(ctx)
 	default:
@@ -63,6 +65,10 @@ func list(ctx context.Context, out io.Writer) error {
 	return mkcdj.New(repo()).List(out)
 }
 
+func files(ctx context.Context, out io.Writer) error {
+	return mkcdj.New(repo()).Files(out)
+}
+
 func prune(ctx context.Context) error {
 	return mkcdj.New(repo()).Prune()
 }
@@ -73,6 +79,7 @@ Usage:
   mkcdj analyze PRESET AUDIO_FILE
   mkcdj compile DEST_DIRECTORY
   mkcdj list
+  mkcdj files
   mkcdj prune`
 
 func usage() error { return errors.New(help) }
