@@ -98,6 +98,8 @@ func TestCompile(t *testing.T) {
 	SUT := mkcdj.New(
 		mkcdj.WithRepository(repo),
 		mkcdj.WithConvertFunc(stubConvert),
+		mkcdj.WithWaveformFunc(stubWaveform),
+		mkcdj.WithSpectrogramFunc(stubSpectrogram),
 	)
 
 	if err := SUT.Compile(context.Background(), dir); err != nil {
@@ -106,7 +108,7 @@ func TestCompile(t *testing.T) {
 
 	dirFS := os.DirFS(dir)
 
-	files, err := fs.Glob(dirFS, "mkcdj-*/*/*")
+	files, err := fs.Glob(dirFS, "mkcdj-*/*/*/*")
 
 	if err != nil {
 		t.Error(err)
@@ -115,18 +117,23 @@ func TestCompile(t *testing.T) {
 	t.Log(files)
 
 	base, ext := filepath.Base(fd.Name()), filepath.Ext(fd.Name())
-	want := fmt.Sprintf("100 - %s.wav", base[:len(base)-len(ext)])
+	want := fmt.Sprintf("100 - %s", base[:len(base)-len(ext)])
 
-	assert(t, "1", fmt.Sprint(len(files)))
-	assert(t, want, filepath.Base(files[0]))
+	assert(t, "3", fmt.Sprint(len(files)))
+	assert(t, want+".wav", filepath.Base(files[0]))
 	assert(t, "default", filepath.Base(filepath.Dir(files[0])))
 
-	content, err := os.ReadFile(filepath.Join(dir, filepath.Dir(files[0]), want))
+	checkFile(t, dir, filepath.Dir(files[0]), want+".wav")
+	checkFile(t, dir, filepath.Dir(files[1]), want+".png")
+	checkFile(t, dir, filepath.Dir(files[2]), want+".png")
+}
+
+func checkFile(t *testing.T, components ...string) {
+	content, err := os.ReadFile(filepath.Join(components...))
 	if err != nil {
 		t.Error(err)
 	}
-
-	assert(t, "converted", strings.TrimSpace(string(content)))
+	assert(t, "ok", strings.TrimSpace(string(content)))
 }
 
 func assert(t *testing.T, want, got string) {
@@ -140,5 +147,7 @@ type fakeRepository struct{ buf *bytes.Buffer }
 func (r *fakeRepository) Load(v interface{}) error { return json.NewDecoder(r.buf).Decode(v) }
 func (r *fakeRepository) Save(v interface{}) error { return json.NewEncoder(r.buf).Encode(v) }
 
-func stubAnalyze(context.Context) *exec.Cmd { return exec.Command("echo", "100") }
-func stubConvert(context.Context) *exec.Cmd { return exec.Command("echo", "converted") }
+func stubAnalyze(context.Context) *exec.Cmd     { return exec.Command("echo", "100") }
+func stubConvert(context.Context) *exec.Cmd     { return exec.Command("echo", "ok") }
+func stubWaveform(context.Context) *exec.Cmd    { return exec.Command("echo", "ok") }
+func stubSpectrogram(context.Context) *exec.Cmd { return exec.Command("echo", "ok") }

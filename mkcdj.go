@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,7 +29,7 @@ type Track struct {
 
 // String implements fmt.Stringer for Track.
 func (t Track) String() string {
-	return filepath.Base(t.Path)
+	return fmt.Sprintf("[%s] [%.0f] %s", status(t), t.BPM, filepath.Base(t.Path))
 }
 
 // Preset is a BPM range preset.
@@ -80,9 +83,11 @@ func PresetFromBPM(bpm float64) (Preset, error) {
 
 // Playlist is a DJ playlist.
 type Playlist struct {
-	collection Repository
-	analyze    Pipeline
-	convert    Pipeline
+	collection  Repository
+	analyze     Pipeline
+	convert     Pipeline
+	waveform    Pipeline
+	spectrogram Pipeline
 }
 
 // Repository holds the track collection.
@@ -137,6 +142,20 @@ func WithConvertFunc(f func(context.Context) *exec.Cmd) Option {
 	}
 }
 
+// WithWaveformFunc configures the shell command used to generate waveforms.
+func WithWaveformFunc(f func(context.Context) *exec.Cmd) Option {
+	return func(list *Playlist) {
+		list.waveform = PipelineFunc(f)
+	}
+}
+
+// WithSpectrogramFunc configures the shell command used to generate waveforms.
+func WithSpectrogramFunc(f func(context.Context) *exec.Cmd) Option {
+	return func(list *Playlist) {
+		list.spectrogram = PipelineFunc(f)
+	}
+}
+
 // List pretty-prints the current playlist.
 func (list *Playlist) List(out io.Writer) error {
 	tracks := make([]Track, 0)
@@ -151,8 +170,9 @@ func (list *Playlist) List(out io.Writer) error {
 		return tracks[i].BPM < tracks[j].BPM
 	})
 
+	// Print all the tracks and their metadata.
 	for _, t := range tracks {
-		if err := print(out, t); err != nil {
+		if _, err := fmt.Fprintln(out, t); err != nil {
 			return err
 		}
 	}
@@ -195,6 +215,8 @@ func (list *Playlist) Prune() error {
 	for i := range tracks {
 		if status(tracks[i]) != fail {
 			clean = append(clean, tracks[i])
+		} else {
+			log.Println(tracks[i])
 		}
 	}
 
@@ -239,6 +261,8 @@ func (list *Playlist) Analyze(ctx context.Context, path string) error {
 		tracks = append(tracks, track)
 	}
 
+	log.Println(track)
+
 	// Persist the final collection.
 	return list.collection.Save(&tracks)
 }
@@ -259,49 +283,67 @@ func (list *Playlist) Compile(ctx context.Context, path string) error {
 		return err
 	}
 
-	const numWorkers = 4
+	// Limit concurrency to avoid bottlenecks while exporting to disk.
+	var numWorkers = runtime.NumCPU() / 3
+
+	log.Println("[workers]", numWorkers)
 
 	// Initialize scheduling tools.
 	wg := new(sync.WaitGroup)
-	input := make(chan Track, numWorkers)
-	sink := make(chan error, len(tracks))
+	jobs := make(chan Track, numWorkers)
+	sink := make(chan error, numWorkers)
 
-	wg.Add(numWorkers + 1)
+	teardown := func() {
+		close(jobs)
+		wg.Wait()
+		close(sink)
+	}
 
-	// Start the workers that will handle file conversions.
+	wg.Add(numWorkers)
+
+	// This function is the core processing step of each worker.
+	// Internally, this handles file conversions, images generations...
+	do := func(t Track) error {
+		return convert(ctx, dir, t, list.convert, list.waveform, list.spectrogram)
+	}
+
+	// Start workers. Run until the input channel is closed.
 	for i := 0; i < numWorkers; i++ {
 		go func() {
 			defer wg.Done()
-			for t := range input {
-				sink <- convert(ctx, t.Path, rename(dir, t), list.convert)
+			for t := range jobs {
+				sink <- do(t)
 			}
 		}()
 	}
 
-	// Feed the input channel with every track in the collection.
+	var once sync.Once
+	defer once.Do(teardown)
+
+	// Feed the input channel with every track in the collection. Once done,
+	// closing the input channel will stop the workers. We wait for workers to finish
+	// before closing the error sink.
 	go func() {
-		defer wg.Done()
-		defer close(input)
+		defer once.Do(teardown)
 		for _, t := range tracks {
-			input <- t
+			jobs <- t
 		}
 	}()
 
-	wg.Wait()
-
-	close(sink)
-
-	// Handle errors.
+	// Even if we don't finish reading this channel, buffering will ensure we can
+	// flush workers before returning early in case of error.
 	for err := range sink {
 		if err != nil {
 			return err
 		}
 	}
 
+	log.Println("[done]", dir)
+
 	return nil
 }
 
-func rename(dir string, t Track) string {
+func rename(t Track) string {
 	var subdir string
 
 	switch p, err := PresetFromBPM(t.BPM); {
@@ -314,9 +356,9 @@ func rename(dir string, t Track) string {
 
 	base, ext := filepath.Base(t.Path), filepath.Ext(t.Path)
 	name := base[:len(base)-len(ext)]
-	path := fmt.Sprintf("%.0f - %s.wav", t.BPM, name)
+	path := fmt.Sprintf("%.0f - %s", t.BPM, name)
 
-	return filepath.Join(dir, subdir, path)
+	return filepath.Join(subdir, path)
 }
 
 func track(ctx context.Context, path string, p Pipeline) (Track, error) {
@@ -326,8 +368,6 @@ func track(ctx context.Context, path string, p Pipeline) (Track, error) {
 	hc, bc := make(chan string, 1), make(chan float64, 1)
 	sink := make(chan error, 2)
 
-	// Hash the file. This will be used to avoid duplicates in the collection as
-	// well as speed up some operations.
 	go func() {
 		defer wg.Done()
 		hash, err := hash(path)
@@ -335,8 +375,6 @@ func track(ctx context.Context, path string, p Pipeline) (Track, error) {
 		sink <- err
 	}()
 
-	// Compute the BPM analysis from the given shell pipeline. Convert the command
-	// output to a float64 value.
 	go func() {
 		defer wg.Done()
 		bpm, err := analyze(ctx, path, p)
@@ -351,7 +389,6 @@ func track(ctx context.Context, path string, p Pipeline) (Track, error) {
 
 	close(sink)
 
-	// Handle any error that occurred during hash or BPM analysis steps.
 	for err := range sink {
 		if err != nil {
 			return Track{}, err
@@ -397,7 +434,49 @@ func analyze(ctx context.Context, path string, p Pipeline) (float64, error) {
 	return res, nil
 }
 
-func convert(ctx context.Context, src, dst string, p Pipeline) error {
+func convert(ctx context.Context, root string, t Track, c, w, s Pipeline) error {
+	log.Println(t)
+
+	wg, sink := new(sync.WaitGroup), make(chan error, 3)
+	wg.Add(3)
+
+	dst := func(dir, suffix string) string {
+		return filepath.Join(dir, rename(t)+suffix)
+	}
+
+	audio := filepath.Join(root, "audio")
+	waves := filepath.Join(root, "waveforms")
+	specs := filepath.Join(root, "spectrograms")
+
+	go func() {
+		defer wg.Done()
+		sink <- build(ctx, t.Path, dst(audio, wav), c)
+	}()
+
+	go func() {
+		defer wg.Done()
+		sink <- build(ctx, t.Path, dst(waves, png), w)
+	}()
+
+	go func() {
+		defer wg.Done()
+		sink <- build(ctx, t.Path, dst(specs, png), s)
+	}()
+
+	wg.Wait()
+
+	close(sink)
+
+	for err := range sink {
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func build(ctx context.Context, src, dst string, p Pipeline) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
@@ -421,23 +500,28 @@ func convert(ctx context.Context, src, dst string, p Pipeline) error {
 	return run(ctx, p, in, out)
 }
 
-const pipelineTimeout = 1 * time.Minute
-
 func run(parent context.Context, p Pipeline, stdin io.Reader, stdout io.Writer) error {
+	const pipelineTimeout = 1 * time.Minute
+
 	ctx, cancel := context.WithTimeout(parent, pipelineTimeout)
 	defer cancel()
 
 	cmd := p.Command(ctx)
 
-	cmd.Stdin, cmd.Stdout = stdin, stdout
+	stderr := bytes.NewBuffer(nil)
+
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+
+	line, err := stderr.ReadString(0x0A)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+
+	if message := strings.TrimSpace(line); message != "" {
+		log.Println(message)
+	}
 
 	return cmd.Run()
-}
-
-func print(out io.Writer, t Track) error {
-	line := fmt.Sprintf("[%s] [%.0f] %s", status(t), t.BPM, t)
-	_, err := fmt.Fprintln(out, line)
-	return err
 }
 
 const (
@@ -446,9 +530,10 @@ const (
 	warn = "warn"
 	fail = "fail"
 
-	// Lossless extensions.
+	// File extensions.
 	wav  = ".wav"
 	flac = ".flac"
+	png  = ".png"
 )
 
 func status(t Track) string {

@@ -20,3 +20,11 @@ func TestAnalyze(t *testing.T) {
 func TestConvert(t *testing.T) {
 	t.Skip(skipMessage)
 }
+
+func TestWaveform(t *testing.T) {
+	t.Skip(skipMessage)
+}
+
+func TestSpectrogram(t *testing.T) {
+	t.Skip(skipMessage)
+}

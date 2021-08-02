@@ -3,16 +3,23 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"log"
 	"mkcdj"
 	"mkcdj/pipeline"
 	"mkcdj/repository"
 	"os"
+	"strconv"
 )
 
+var verbose = flag.Bool("v", false, "Print additional information")
+
 func main() {
-	if err := run(os.Args...); err != nil {
+	flag.Parse()
+
+	if err := run(flag.Args()...); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", os.Args[0], err)
 		os.Exit(1)
 	}
@@ -23,21 +30,27 @@ func run(args ...string) error {
 		return err
 	}
 
+	if *verbose {
+		log.SetOutput(os.Stderr)
+	} else {
+		log.SetOutput(io.Discard)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	switch {
-	case len(args) < 2:
+	case len(args) < 1:
 		return usage()
-	case args[1] == "analyze" && len(args) == 4:
-		return analyze(ctx, args[2], args[3])
-	case args[1] == "compile" && len(args) == 3:
-		return compile(ctx, args[2])
-	case args[1] == "list" && len(args) == 2:
+	case args[0] == "analyze" && len(args) == 3:
+		return analyze(ctx, args[1], args[2])
+	case args[0] == "compile" && len(args) == 2:
+		return compile(ctx, args[1])
+	case args[0] == "list" && len(args) == 1:
 		return list(ctx, os.Stdout)
-	case args[1] == "files" && len(args) == 2:
+	case args[0] == "files" && len(args) == 1:
 		return files(ctx, os.Stdout)
-	case args[1] == "prune" && len(args) == 2:
+	case args[0] == "prune" && len(args) == 1:
 		return prune(ctx)
 	default:
 		return usage()
@@ -45,17 +58,16 @@ func run(args ...string) error {
 }
 
 func analyze(ctx context.Context, preset, path string) error {
-	p, err := mkcdj.PresetFromName(preset)
-	if preset != "default" && err != nil {
+	switch p, err := lookup(preset); {
+	case err != nil:
 		return err
+	default:
+		return mkcdj.New(opts(p.Range())...).Analyze(ctx, path)
 	}
-	min, max := p.Range()
-	m := mkcdj.New(repo(), mkcdj.WithAnalyzeFunc(pipeline.Analyze(min, max)))
-	return m.Analyze(ctx, path)
 }
 
-func compile(ctx context.Context, dest string) error {
-	return mkcdj.New(repo(), mkcdj.WithConvertFunc(pipeline.Convert())).Compile(ctx, dest)
+func compile(ctx context.Context, path string) error {
+	return mkcdj.New(opts(mkcdj.Default.Range())...).Compile(ctx, path)
 }
 
 func list(ctx context.Context, out io.Writer) error {
@@ -71,20 +83,40 @@ func prune(ctx context.Context) error {
 }
 
 const help string = `invalid parameters
-
-Usage:
-  mkcdj analyze PRESET AUDIO_FILE
-  mkcdj compile DEST_DIRECTORY
-  mkcdj list
-  mkcdj files
-  mkcdj prune`
+usage:
+  mkcdj [-v] analyze PRESET AUDIO_FILE
+  mkcdj [-v] compile DEST_DIRECTORY
+  mkcdj [-v] list
+  mkcdj [-v] files
+  mkcdj [-v] prune`
 
 func usage() error { return errors.New(help) }
+
+func opts(min, max string) []mkcdj.Option {
+	return []mkcdj.Option{
+		repo(),
+		mkcdj.WithAnalyzeFunc(pipeline.Analyze(min, max)),
+		mkcdj.WithConvertFunc(pipeline.Convert()),
+		mkcdj.WithWaveformFunc(pipeline.Waveform()),
+		mkcdj.WithSpectrogramFunc(pipeline.Spectrogram()),
+	}
+}
 
 func repo() mkcdj.Option {
 	return mkcdj.WithRepository(
 		repository.JSONFile(env("MKCDJ_STORE", "/tmp/mkcdj.json")),
 	)
+}
+
+func lookup(name string) (mkcdj.Preset, error) {
+	switch bpm, err := strconv.ParseFloat(name, 64); {
+	case err == nil:
+		return mkcdj.PresetFromBPM(bpm)
+	case name == "default":
+		return mkcdj.Default, nil
+	default:
+		return mkcdj.PresetFromName(name)
+	}
 }
 
 func env(name, fallback string) string {

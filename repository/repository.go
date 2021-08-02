@@ -1,3 +1,4 @@
+// Package repository allows to persist and load data.
 package repository
 
 import (
