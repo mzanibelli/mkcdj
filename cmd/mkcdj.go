@@ -93,7 +93,7 @@ func opts() []mkcdj.Option {
 	return []mkcdj.Option{
 		repo(),
 		mkcdj.WithPipeline("analyze", ffmpeg.F32LE),
-		mkcdj.WithPipeline("convert", ffmpeg.AudioCD),
+		mkcdj.WithPipeline("convert", ffmpeg.AudioOut),
 		mkcdj.WithPipeline("waveform", ffmpeg.PNGWaveform),
 		mkcdj.WithPipeline("spectrum", ffmpeg.PNGSpectrum),
 		mkcdj.WithBPMScanFunc(bpm.Scan),

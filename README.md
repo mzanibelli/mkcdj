@@ -33,7 +33,7 @@ You can also pass a BPM value instead of a named preset. In that case the system
 
 ## Export format
 
-All files are exported in WAV 16 bits 44100Hz.
+All files are exported in WAV 24 bits 44100Hz.
 
 Additionally, waveform and spectrogram pictures of each file are generated in separate directories.
 
