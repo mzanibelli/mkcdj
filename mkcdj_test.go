@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"mkcdj"
 	"os"
@@ -36,16 +37,17 @@ func TestAnalyze(t *testing.T) {
 
 	SUT := mkcdj.New(
 		mkcdj.WithRepository(repo),
-		mkcdj.WithAnalyzeFunc(stubAnalyze),
+		mkcdj.WithPipeline("analyze", stubAnalyze),
+		mkcdj.WithBPMScanFunc(stubBPMScanner),
 	)
 
 	ctx := context.Background()
 
 	// Do the analysis twice to check duplication.
-	if err := SUT.Analyze(ctx, fd.Name()); err != nil {
+	if err := SUT.Analyze(ctx, fd.Name(), mkcdj.Default); err != nil {
 		t.Error(err)
 	}
-	if err := SUT.Analyze(ctx, fd.Name()); err != nil {
+	if err := SUT.Analyze(ctx, fd.Name(), mkcdj.Default); err != nil {
 		t.Error(err)
 	}
 
@@ -97,9 +99,9 @@ func TestCompile(t *testing.T) {
 
 	SUT := mkcdj.New(
 		mkcdj.WithRepository(repo),
-		mkcdj.WithConvertFunc(stubConvert),
-		mkcdj.WithWaveformFunc(stubWaveform),
-		mkcdj.WithSpectrogramFunc(stubSpectrogram),
+		mkcdj.WithPipeline("convert", stubConvert),
+		mkcdj.WithPipeline("waveform", stubWaveform),
+		mkcdj.WithPipeline("spectrum", stubSpectrogram),
 	)
 
 	if err := SUT.Compile(context.Background(), dir); err != nil {
@@ -147,7 +149,9 @@ type fakeRepository struct{ buf *bytes.Buffer }
 func (r *fakeRepository) Load(v interface{}) error { return json.NewDecoder(r.buf).Decode(v) }
 func (r *fakeRepository) Save(v interface{}) error { return json.NewEncoder(r.buf).Encode(v) }
 
-func stubAnalyze(context.Context) *exec.Cmd     { return exec.Command("echo", "100") }
+func stubAnalyze(context.Context) *exec.Cmd     { return exec.Command("echo", "ok") }
 func stubConvert(context.Context) *exec.Cmd     { return exec.Command("echo", "ok") }
 func stubWaveform(context.Context) *exec.Cmd    { return exec.Command("echo", "ok") }
 func stubSpectrogram(context.Context) *exec.Cmd { return exec.Command("echo", "ok") }
+
+func stubBPMScanner(r io.Reader, min, max float64) (float64, error) { return 100, nil }

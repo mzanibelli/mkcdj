@@ -4,9 +4,7 @@ A tool to manage an audio playlist with BPM analysis.
 
 ## Dependencies
 
-You need to have `ffmpeg(1)`, and [bpm-tools](https://www.pogo.org.uk/~mark/bpm-tools) installed.
-
-Ultimately, native implementations or low-level bindings would replace shell commands.
+You need to have `ffmpeg(1)` installed.
 
 ## Usage
 
@@ -38,3 +36,7 @@ You can also pass a BPM value instead of a named preset. In that case the system
 All files are exported in WAV 16 bits 44100Hz.
 
 Additionally, waveform and spectrogram pictures of each file are generated in separate directories.
+
+## Credits
+
+BPM detection algorithm is a simplified, slightly optimized and cleaned up version of [github.com/benjojo/bpm](https://github.com/benjojo/bpm) which a port of bpm-tools in Go.

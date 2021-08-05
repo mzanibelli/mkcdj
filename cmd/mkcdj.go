@@ -8,7 +8,8 @@ import (
 	"io"
 	"log"
 	"mkcdj"
-	"mkcdj/pipeline"
+	"mkcdj/bpm"
+	"mkcdj/ffmpeg"
 	"mkcdj/repository"
 	"os"
 	"strconv"
@@ -26,10 +27,6 @@ func main() {
 }
 
 func run(args ...string) error {
-	if err := pipeline.Check(); err != nil {
-		return err
-	}
-
 	if *verbose {
 		log.SetOutput(os.Stderr)
 	} else {
@@ -62,12 +59,12 @@ func analyze(ctx context.Context, preset, path string) error {
 	case err != nil:
 		return err
 	default:
-		return mkcdj.New(opts(p.Range())...).Analyze(ctx, path)
+		return mkcdj.New(opts()...).Analyze(ctx, path, p)
 	}
 }
 
 func compile(ctx context.Context, path string) error {
-	return mkcdj.New(opts(mkcdj.Default.Range())...).Compile(ctx, path)
+	return mkcdj.New(opts()...).Compile(ctx, path)
 }
 
 func list(ctx context.Context, out io.Writer) error {
@@ -92,13 +89,14 @@ usage:
 
 func usage() error { return errors.New(help) }
 
-func opts(min, max string) []mkcdj.Option {
+func opts() []mkcdj.Option {
 	return []mkcdj.Option{
 		repo(),
-		mkcdj.WithAnalyzeFunc(pipeline.Analyze(min, max)),
-		mkcdj.WithConvertFunc(pipeline.Convert()),
-		mkcdj.WithWaveformFunc(pipeline.Waveform()),
-		mkcdj.WithSpectrogramFunc(pipeline.Spectrogram()),
+		mkcdj.WithPipeline("analyze", ffmpeg.F32LE),
+		mkcdj.WithPipeline("convert", ffmpeg.AudioCD),
+		mkcdj.WithPipeline("waveform", ffmpeg.PNGWaveform),
+		mkcdj.WithPipeline("spectrum", ffmpeg.PNGSpectrum),
+		mkcdj.WithBPMScanFunc(bpm.Scan),
 	}
 }
 

@@ -1,6 +1,7 @@
 package mkcdj
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -14,7 +15,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,7 +29,7 @@ type Track struct {
 
 // String implements fmt.Stringer for Track.
 func (t Track) String() string {
-	return fmt.Sprintf("[%s] [%.0f] %s", status(t), t.BPM, filepath.Base(t.Path))
+	return fmt.Sprintf("[%s] [%.0f] %s", status(t), math.Round(t.BPM), filepath.Base(t.Path))
 }
 
 // Preset is a BPM range preset.
@@ -83,11 +83,12 @@ func PresetFromBPM(bpm float64) (Preset, error) {
 
 // Playlist is a DJ playlist.
 type Playlist struct {
-	collection  Repository
-	analyze     Pipeline
-	convert     Pipeline
-	waveform    Pipeline
-	spectrogram Pipeline
+	collection Repository
+	analyze    Pipeline
+	convert    Pipeline
+	waveform   Pipeline
+	spectrum   Pipeline
+	scanner    BPMScanner
 }
 
 // Repository holds the track collection.
@@ -128,31 +129,41 @@ func WithRepository(r Repository) Option {
 	}
 }
 
-// WithAnalyzeFunc configures the shell command used to compute BPM data.
-func WithAnalyzeFunc(f func(context.Context) *exec.Cmd) Option {
+// WithPipeline configures one of the pipelines.
+func WithPipeline(name string, f func(context.Context) *exec.Cmd) Option {
 	return func(list *Playlist) {
-		list.analyze = PipelineFunc(f)
+		switch name {
+		case "analyze":
+			list.analyze = PipelineFunc(f)
+		case "convert":
+			list.convert = PipelineFunc(f)
+		case "waveform":
+			list.waveform = PipelineFunc(f)
+		case "spectrum":
+			list.spectrum = PipelineFunc(f)
+		default:
+			panic("unknown pipeline")
+		}
 	}
 }
 
-// WithConvertFunc configures the shell command used to convert final files.
-func WithConvertFunc(f func(context.Context) *exec.Cmd) Option {
-	return func(list *Playlist) {
-		list.convert = PipelineFunc(f)
-	}
+// BPMScanner scans raw f32le data for BPM given a range.
+type BPMScanner interface {
+	Scan(r io.Reader, min, max float64) (float64, error)
 }
 
-// WithWaveformFunc configures the shell command used to generate waveforms.
-func WithWaveformFunc(f func(context.Context) *exec.Cmd) Option {
-	return func(list *Playlist) {
-		list.waveform = PipelineFunc(f)
-	}
+// BPMScanFunc is a function implementation of BPMScanner.
+type BPMScanFunc func(r io.Reader, min, max float64) (float64, error)
+
+// Scan implements BPMScanner for BPMScanFunc.
+func (f BPMScanFunc) Scan(r io.Reader, min, max float64) (float64, error) {
+	return f(r, min, max)
 }
 
-// WithSpectrogramFunc configures the shell command used to generate waveforms.
-func WithSpectrogramFunc(f func(context.Context) *exec.Cmd) Option {
+// WithBPMScanFunc configures the BPM scanner.
+func WithBPMScanFunc(f func(r io.Reader, min, max float64) (float64, error)) Option {
 	return func(list *Playlist) {
-		list.spectrogram = PipelineFunc(f)
+		list.scanner = BPMScanFunc(f)
 	}
 }
 
@@ -225,7 +236,7 @@ func (list *Playlist) Prune() error {
 }
 
 // Analyze adds a track to the playlist and computes its BPM.
-func (list *Playlist) Analyze(ctx context.Context, path string) error {
+func (list *Playlist) Analyze(ctx context.Context, path string, preset Preset) error {
 	tracks := make([]Track, 0)
 
 	// Load the existing collection.
@@ -240,7 +251,7 @@ func (list *Playlist) Analyze(ctx context.Context, path string) error {
 	}
 
 	// Compute the Track.
-	track, err := track(ctx, abs, list.analyze)
+	track, err := track(ctx, abs, preset, list.analyze, list.scanner)
 	if err != nil {
 		return err
 	}
@@ -304,7 +315,7 @@ func (list *Playlist) Compile(ctx context.Context, path string) error {
 	// This function is the core processing step of each worker.
 	// Internally, this handles file conversions, images generations...
 	do := func(t Track) error {
-		return convert(ctx, dir, t, list.convert, list.waveform, list.spectrogram)
+		return convert(ctx, dir, t, list.convert, list.waveform, list.spectrum)
 	}
 
 	// Start workers. Run until the input channel is closed.
@@ -356,12 +367,12 @@ func rename(t Track) string {
 
 	base, ext := filepath.Base(t.Path), filepath.Ext(t.Path)
 	name := base[:len(base)-len(ext)]
-	path := fmt.Sprintf("%.0f - %s", t.BPM, name)
+	path := fmt.Sprintf("%.0f - %s", math.Round(t.BPM), name)
 
 	return filepath.Join(subdir, path)
 }
 
-func track(ctx context.Context, path string, p Pipeline) (Track, error) {
+func track(ctx context.Context, path string, preset Preset, p Pipeline, s BPMScanner) (Track, error) {
 	wg := new(sync.WaitGroup)
 	wg.Add(2)
 
@@ -377,7 +388,7 @@ func track(ctx context.Context, path string, p Pipeline) (Track, error) {
 
 	go func() {
 		defer wg.Done()
-		bpm, err := analyze(ctx, path, p)
+		bpm, err := analyze(ctx, path, preset, p, s)
 		bc <- bpm
 		sink <- err
 	}()
@@ -413,7 +424,7 @@ func hash(path string) (string, error) {
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-func analyze(ctx context.Context, path string, p Pipeline) (float64, error) {
+func analyze(ctx context.Context, path string, preset Preset, p Pipeline, s BPMScanner) (float64, error) {
 	fd, err := os.Open(path)
 	if err != nil {
 		return 0, err
@@ -422,16 +433,11 @@ func analyze(ctx context.Context, path string, p Pipeline) (float64, error) {
 
 	buf := bytes.NewBuffer(nil)
 
-	if err := run(ctx, p, fd, buf); err != nil {
+	if err := run(ctx, p, bufio.NewReader(fd), buf); err != nil {
 		return 0, err
 	}
 
-	res, err := strconv.ParseFloat(strings.TrimSpace(buf.String()), 64)
-	if err != nil {
-		return 0, err
-	}
-
-	return res, nil
+	return s.Scan(buf, preset.Min, preset.Max)
 }
 
 func convert(ctx context.Context, root string, t Track, c, w, s Pipeline) error {
@@ -497,7 +503,13 @@ func build(ctx context.Context, src, dst string, p Pipeline) error {
 	}
 	defer out.Close()
 
-	return run(ctx, p, in, out)
+	r, w := bufio.NewReader(in), bufio.NewWriter(out)
+
+	if err := run(ctx, p, r, w); err != nil {
+		return err
+	}
+
+	return w.Flush()
 }
 
 func run(parent context.Context, p Pipeline, stdin io.Reader, stdout io.Writer) error {
