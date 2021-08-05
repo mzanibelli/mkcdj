@@ -10,6 +10,7 @@ You need to have `ffmpeg(1)` installed.
 
 - Run `mkcdj analyze PRESET PATH` to add a track to the collection
 - Run `mkcdj compile PATH` to export all files to the given directory
+- Run `mkcdj refresh` to automatically run BPM analysis on all tracks again
 - Run `mkcdj list` to preview the tracklist
 - Run `mkcdj files` to print absolute file paths (for scripting)
 - Run `mkcdj prune` to remove lost files from the current playlist
@@ -39,4 +40,4 @@ Additionally, waveform and spectrogram pictures of each file are generated in se
 
 ## Credits
 
-BPM detection algorithm is a simplified, slightly optimized and cleaned up version of [github.com/benjojo/bpm](https://github.com/benjojo/bpm) which a port of bpm-tools in Go.
+BPM detection algorithm is a simplified, slightly optimized and cleaned up version of [github.com/benjojo/bpm](https://github.com/benjojo/bpm) which a port of [bpm-tools](https://www.pogo.org.uk/~mark/bpm-tools/) in Go.

@@ -1,12 +1,46 @@
 package ffmpeg_test
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"mkcdj/ffmpeg"
+	"os"
+	"os/exec"
 	"testing"
+	"time"
 )
 
-const skipMessage = "this test requires real audio files to be executed"
+func TestFFMPEG(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-func TestAnalyze(t *testing.T)     { t.Skip(skipMessage) }
-func TestConvert(t *testing.T)     { t.Skip(skipMessage) }
-func TestWaveform(t *testing.T)    { t.Skip(skipMessage) }
-func TestSpectrogram(t *testing.T) { t.Skip(skipMessage) }
+	t.Run("analyze", run(ffmpeg.F32LE(ctx)))
+	t.Run("convert", run(ffmpeg.AudioOut(ctx)))
+	t.Run("waveform", run(ffmpeg.PNGWaveform(ctx)))
+	t.Run("spectrum", run(ffmpeg.PNGSpectrum(ctx)))
+}
+
+func run(cmd *exec.Cmd) func(t *testing.T) {
+	return func(t *testing.T) {
+		fd, err := os.Open("./testdata/track.wav")
+		if err != nil {
+			t.Error(err)
+		}
+		defer fd.Close()
+
+		stderr := bytes.NewBuffer(nil)
+
+		cmd.Stdin = fd
+		cmd.Stdout = io.Discard
+		cmd.Stderr = stderr
+
+		err = cmd.Run()
+
+		t.Log(stderr.String())
+
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}

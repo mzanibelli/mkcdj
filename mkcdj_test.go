@@ -65,6 +65,64 @@ func TestAnalyze(t *testing.T) {
 	assert(t, "100", fmt.Sprint(tracks[0].BPM))
 }
 
+func TestRefresh(t *testing.T) {
+	dir, err := os.MkdirTemp(os.TempDir(), "mkcdj-analyze-*")
+	if err != nil {
+		t.Error(err)
+	}
+	defer os.RemoveAll(dir)
+
+	fd, err := os.CreateTemp(dir, "mkcdj-analyze-source-*.flac")
+	if err != nil {
+		t.Error(err)
+	}
+
+	if _, err := fmt.Fprintln(fd, "hello"); err != nil {
+		t.Error(err)
+	}
+	defer fd.Close()
+
+	track := mkcdj.Track{
+		Path: fd.Name(),
+		Hash: "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+		BPM:  100,
+	}
+
+	tracks := []mkcdj.Track{track}
+
+	repo := new(fakeRepository)
+	repo.buf = bytes.NewBuffer(nil)
+
+	if err := repo.Save(&tracks); err != nil {
+		t.Error(err)
+	}
+
+	SUT := mkcdj.New(
+		mkcdj.WithRepository(repo),
+		mkcdj.WithPipeline("analyze", stubAnalyze),
+		mkcdj.WithBPMScanFunc(stubBPMScanner),
+	)
+
+	ctx := context.Background()
+
+	if err := SUT.Refresh(ctx); err != nil {
+		t.Error(err)
+	}
+
+	t.Log(repo.buf.String())
+
+	tracks = make([]mkcdj.Track, 0)
+
+	if err := repo.Load(&tracks); err != nil {
+		t.Error(err)
+	}
+
+	assert(t, "1", fmt.Sprint(len(tracks)))
+	assert(t, fd.Name(), tracks[0].Path)
+	assert(t, "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03", tracks[0].Hash)
+	assert(t, "100", fmt.Sprint(tracks[0].BPM))
+}
+
 func TestCompile(t *testing.T) {
 	dir, err := os.MkdirTemp(os.TempDir(), "mkcdj-compile-*")
 	if err != nil {

@@ -278,6 +278,52 @@ func (list *Playlist) Analyze(ctx context.Context, path string, preset Preset) e
 	return list.collection.Save(&tracks)
 }
 
+// Refresh re-analyzes all tracks in the playlist.
+func (list *Playlist) Refresh(ctx context.Context) error {
+	tracks := make([]Track, 0)
+
+	// Load the existing collection.
+	if err := list.collection.Load(&tracks); err != nil {
+		return err
+	}
+
+	fresh := make([]Track, 0)
+
+	// Each job will spawn two goroutines.
+	var n = runtime.NumCPU() / 2
+
+	log.Println("[workers]", n)
+
+	// Protect the new track collection from concurrent writes.
+	var mu sync.Mutex
+
+	// Use the BPM range determined from previous analysis.
+	do := func(t Track) error {
+		p, _ := PresetFromBPM(t.BPM)
+
+		t, err := track(ctx, t.Path, p, list.analyze, list.scanner)
+		if err != nil {
+			return err
+		}
+
+		log.Println(t)
+
+		mu.Lock()
+		defer mu.Unlock()
+		fresh = append(fresh, t)
+
+		return nil
+	}
+
+	// Re-analyze the whole collection.
+	if err := each(n, tracks, do); err != nil {
+		return err
+	}
+
+	// Persist the final collection.
+	return list.collection.Save(&fresh)
+}
+
 // Compile converts all files to a common format and exports them in the given
 // directory classified by BPM.
 func (list *Playlist) Compile(ctx context.Context, path string) error {
@@ -295,22 +341,10 @@ func (list *Playlist) Compile(ctx context.Context, path string) error {
 	}
 
 	// Limit concurrency to avoid bottlenecks while exporting to disk.
-	var numWorkers = runtime.NumCPU() / 3
+	// Each job will spawn three FFMPEG processes.
+	var n = runtime.NumCPU() / 3
 
-	log.Println("[workers]", numWorkers)
-
-	// Initialize scheduling tools.
-	wg := new(sync.WaitGroup)
-	jobs := make(chan Track, numWorkers)
-	sink := make(chan error, numWorkers)
-
-	teardown := func() {
-		close(jobs)
-		wg.Wait()
-		close(sink)
-	}
-
-	wg.Add(numWorkers)
+	log.Println("[workers]", n)
 
 	// This function is the core processing step of each worker.
 	// Internally, this handles file conversions, images generations...
@@ -318,8 +352,32 @@ func (list *Playlist) Compile(ctx context.Context, path string) error {
 		return convert(ctx, dir, t, list.convert, list.waveform, list.spectrum)
 	}
 
+	// Process each track.
+	if err := each(n, tracks, do); err != nil {
+		return err
+	}
+
+	log.Println("[done]", dir)
+
+	return nil
+}
+
+func each(size int, tracks []Track, do func(t Track) error) error {
+	// Initialize scheduling tools.
+	wg := new(sync.WaitGroup)
+	jobs := make(chan Track, size)
+	sink := make(chan error, size)
+
+	teardown := func() {
+		close(jobs)
+		wg.Wait()
+		close(sink)
+	}
+
+	wg.Add(size)
+
 	// Start workers. Run until the input channel is closed.
-	for i := 0; i < numWorkers; i++ {
+	for i := 0; i < size; i++ {
 		go func() {
 			defer wg.Done()
 			for t := range jobs {
@@ -348,8 +406,6 @@ func (list *Playlist) Compile(ctx context.Context, path string) error {
 			return err
 		}
 	}
-
-	log.Println("[done]", dir)
 
 	return nil
 }

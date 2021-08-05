@@ -23,37 +23,14 @@ const (
 // Scan returns the BPM of audio data from a Reader containing f32le samples.
 // The BPM detection is between the given range.
 func Scan(r io.Reader, min, max float64) (float64, error) {
-	samples, err := read(r)
+	nrg, err := energy(r)
 	if err != nil {
 		return 0, err
 	}
-	return scan(samples, min, max), nil
+	return scan(nrg, min, max), nil
 }
 
-func scan(nrg []float32, min, max float64) float64 {
-	imin := bpmToInterval(min)
-	imax := bpmToInterval(max)
-	step := (imin - imax) / float64(Steps)
-
-	height, trough := math.Inf(0), math.NaN()
-
-	for interval := imax; interval <= imin; interval += step {
-		var t float64
-
-		for s := 0; s < Samples; s++ {
-			t += autodifference(nrg, interval)
-		}
-
-		if t < height {
-			trough = interval
-			height = t
-		}
-	}
-
-	return intervalToBpm(trough)
-}
-
-func read(r io.Reader) ([]float32, error) {
+func energy(r io.Reader) ([]float32, error) {
 	res := make([]float32, 0)
 
 	var v, n float64
@@ -80,6 +57,29 @@ func read(r io.Reader) ([]float32, error) {
 			n, res = 0, append(res, float32(v))
 		}
 	}
+}
+
+func scan(nrg []float32, min, max float64) float64 {
+	imin := bpmToInterval(min)
+	imax := bpmToInterval(max)
+	step := (imin - imax) / float64(Steps)
+
+	height, trough := math.Inf(0), math.NaN()
+
+	for interval := imax; interval <= imin; interval += step {
+		var t float64
+
+		for s := 0; s < Samples; s++ {
+			t += autodifference(nrg, interval)
+		}
+
+		if t < height {
+			trough = interval
+			height = t
+		}
+	}
+
+	return intervalToBpm(trough)
 }
 
 var (
@@ -114,9 +114,8 @@ func autodifference(nrg []float32, interval float64) float64 {
 
 func sample(nrg []float32, offset float64) float64 {
 	n := math.Floor(offset)
-	i := int64(n)
 	if n >= 0.0 && n < float64(len(nrg)) {
-		return float64(nrg[i])
+		return float64(nrg[int(n)])
 	}
 	return 0.0
 }
@@ -129,6 +128,6 @@ func bpmToInterval(bpm float64) float64 {
 
 func intervalToBpm(interval float64) float64 {
 	samplesPerBeat := interval * Interval
-	beatsPerSecond := float64(Rate) / samplesPerBeat
+	beatsPerSecond := Rate / samplesPerBeat
 	return beatsPerSecond * 60
 }
