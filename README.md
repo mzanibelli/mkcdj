@@ -28,7 +28,7 @@ If unset, `/tmp/mkcdj.json` is used.
 A preset is a shorthand to hint the BPM detection. Each preset limits the detection to its predefined BPM range.
 For example, the `dnb` (Drum & Bass) preset limits the detection from 165 to 180 BPM.
 
-[Check the source to see the supported presets](https://github.com/mzanibelli/mkcdj/blob/master/mkcdj.go) or use `default` to get a wide range (1-200).
+[Check the source to see the supported presets](https://github.com/mzanibelli/mkcdj/blob/master/mkcdj.go).
 
 You can also pass a BPM value instead of a named preset. In that case the system will lookup the corresponding range.
 

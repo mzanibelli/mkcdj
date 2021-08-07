@@ -41,10 +41,10 @@ type Preset struct {
 var (
 	DNB     = Preset{165, 179.99}
 	Jungle  = Preset{148, 164.99}
-	Dubstep = Preset{135, 147.99}
-	Garage  = Preset{128, 134.99}
-	House   = Preset{115, 127.99}
-	Default = Preset{1, 200}
+	Dubstep = Preset{138, 147.99}
+	Garage  = Preset{130, 137.99}
+	House   = Preset{115, 129.99}
+	Default = Preset{060, 114.99}
 )
 
 // Internal list used for lookup.
@@ -73,8 +73,9 @@ func PresetFromName(name string) (Preset, error) {
 
 // PresetFromBPM returns the BPM range matching a given value.
 func PresetFromBPM(bpm float64) (Preset, error) {
+	rounded := math.Round(bpm*100) / 100
 	for _, p := range presets {
-		if p.Min <= bpm && bpm <= p.Max {
+		if p.Min <= rounded && rounded <= p.Max {
 			return p, nil
 		}
 	}
@@ -413,8 +414,8 @@ func each(size int, tracks []Track, do func(t Track) error) error {
 func rename(t Track) string {
 	var subdir string
 
-	switch p, err := PresetFromBPM(t.BPM); {
-	case err == nil:
+	switch p, _ := PresetFromBPM(t.BPM); {
+	case p != Default:
 		min, max := p.Range()
 		subdir = fmt.Sprintf("%s - %s", min, max)
 	default:
