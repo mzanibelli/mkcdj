@@ -172,17 +172,10 @@ func WithBPMScanFunc(f func(r io.Reader, min, max float64) (float64, error)) Opt
 func (list *Playlist) List(out io.Writer) error {
 	tracks := make([]Track, 0)
 
-	// Load the existing collection.
 	if err := list.collection.Load(&tracks); err != nil {
 		return err
 	}
 
-	// Sort collection by BPM.
-	sort.SliceStable(tracks, func(i, j int) bool {
-		return tracks[i].BPM < tracks[j].BPM
-	})
-
-	// Print all the tracks and their metadata.
 	for _, t := range tracks {
 		if _, err := fmt.Fprintln(out, t); err != nil {
 			return err
@@ -196,12 +189,10 @@ func (list *Playlist) List(out io.Writer) error {
 func (list *Playlist) Files(out io.Writer) error {
 	tracks := make([]Track, 0)
 
-	// Load the existing collection.
 	if err := list.collection.Load(&tracks); err != nil {
 		return err
 	}
 
-	// Print all the files.
 	for _, t := range tracks {
 		if _, err := fmt.Fprintln(out, t.Path); err != nil {
 			return err
@@ -217,12 +208,10 @@ func (list *Playlist) Files(out io.Writer) error {
 func (list *Playlist) Prune() error {
 	tracks := make([]Track, 0)
 
-	// Load the existing collection.
 	if err := list.collection.Load(&tracks); err != nil {
 		return err
 	}
 
-	// Cleanup tracks with an error status (file not found...).
 	clean := make([]Track, 0)
 	for i := range tracks {
 		if status(tracks[i]) != fail {
@@ -232,7 +221,7 @@ func (list *Playlist) Prune() error {
 		}
 	}
 
-	// Persist the final collection.
+	order(clean)
 	return list.collection.Save(&clean)
 }
 
@@ -240,25 +229,20 @@ func (list *Playlist) Prune() error {
 func (list *Playlist) Analyze(ctx context.Context, path string, preset Preset) error {
 	tracks := make([]Track, 0)
 
-	// Load the existing collection.
 	if err := list.collection.Load(&tracks); err != nil {
 		return err
 	}
 
-	// Ensure all steps of the process use an absolute file path, especially upon save.
 	abs, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
 		return err
 	}
 
-	// Compute the Track.
 	track, err := track(ctx, abs, preset, list.analyze, list.scanner)
 	if err != nil {
 		return err
 	}
 
-	// Check if the same track was already in our collection and update it with the
-	// new version if it is found.
 	var found bool
 	for i := range tracks {
 		if tracks[i].Hash == track.Hash {
@@ -268,14 +252,13 @@ func (list *Playlist) Analyze(ctx context.Context, path string, preset Preset) e
 		}
 	}
 
-	// Otherwise append the new track to the collection.
 	if !found {
 		tracks = append(tracks, track)
 	}
 
 	log.Println(track)
 
-	// Persist the final collection.
+	order(tracks)
 	return list.collection.Save(&tracks)
 }
 
@@ -283,22 +266,19 @@ func (list *Playlist) Analyze(ctx context.Context, path string, preset Preset) e
 func (list *Playlist) Refresh(ctx context.Context) error {
 	tracks := make([]Track, 0)
 
-	// Load the existing collection.
 	if err := list.collection.Load(&tracks); err != nil {
 		return err
 	}
 
 	fresh := make([]Track, 0)
 
-	// Each job will spawn two goroutines.
+	// Each job will spawn two goroutines (hash and BPM analysis).
 	var n = runtime.NumCPU() / 2
 
 	log.Println("[workers]", n)
 
-	// Protect the new track collection from concurrent writes.
 	var mu sync.Mutex
 
-	// Use the BPM range determined from previous analysis.
 	do := func(t Track) error {
 		p, _ := PresetFromBPM(t.BPM)
 
@@ -316,12 +296,11 @@ func (list *Playlist) Refresh(ctx context.Context) error {
 		return nil
 	}
 
-	// Re-analyze the whole collection.
 	if err := each(n, tracks, do); err != nil {
 		return err
 	}
 
-	// Persist the final collection.
+	order(fresh)
 	return list.collection.Save(&fresh)
 }
 
@@ -330,30 +309,24 @@ func (list *Playlist) Refresh(ctx context.Context) error {
 func (list *Playlist) Compile(ctx context.Context, path string) error {
 	tracks := make([]Track, 0)
 
-	// Load the existing collection.
 	if err := list.collection.Load(&tracks); err != nil {
 		return err
 	}
 
-	// Create the directory for the final playlist.
 	dir, err := os.MkdirTemp(filepath.Clean(path), "mkcdj-*")
 	if err != nil {
 		return err
 	}
 
-	// Limit concurrency to avoid bottlenecks while exporting to disk.
 	// Each job will spawn three FFMPEG processes.
 	var n = runtime.NumCPU() / 3
 
 	log.Println("[workers]", n)
 
-	// This function is the core processing step of each worker.
-	// Internally, this handles file conversions, images generations...
 	do := func(t Track) error {
 		return convert(ctx, dir, t, list.convert, list.waveform, list.spectrum)
 	}
 
-	// Process each track.
 	if err := each(n, tracks, do); err != nil {
 		return err
 	}
@@ -363,8 +336,18 @@ func (list *Playlist) Compile(ctx context.Context, path string) error {
 	return nil
 }
 
+func order(tracks []Track) {
+	sort.SliceStable(tracks, func(i, j int) bool {
+		b1, b2 := math.Round(tracks[i].BPM), math.Round(tracks[j].BPM)
+		if b1 == b2 {
+			f1, f2 := filepath.Base(tracks[i].Path), filepath.Base(tracks[j].Path)
+			return strings.Compare(f1, f2) == -1
+		}
+		return b1 < b2
+	})
+}
+
 func each(size int, tracks []Track, do func(t Track) error) error {
-	// Initialize scheduling tools.
 	wg := new(sync.WaitGroup)
 	jobs := make(chan Track, size)
 	sink := make(chan error, size)
@@ -377,7 +360,6 @@ func each(size int, tracks []Track, do func(t Track) error) error {
 
 	wg.Add(size)
 
-	// Start workers. Run until the input channel is closed.
 	for i := 0; i < size; i++ {
 		go func() {
 			defer wg.Done()
@@ -390,9 +372,6 @@ func each(size int, tracks []Track, do func(t Track) error) error {
 	var once sync.Once
 	defer once.Do(teardown)
 
-	// Feed the input channel with every track in the collection. Once done,
-	// closing the input channel will stop the workers. We wait for workers to finish
-	// before closing the error sink.
 	go func() {
 		defer once.Do(teardown)
 		for _, t := range tracks {
@@ -400,8 +379,6 @@ func each(size int, tracks []Track, do func(t Track) error) error {
 		}
 	}()
 
-	// Even if we don't finish reading this channel, buffering will ensure we can
-	// flush workers before returning early in case of error.
 	for err := range sink {
 		if err != nil {
 			return err
