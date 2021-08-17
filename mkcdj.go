@@ -264,20 +264,25 @@ func (list *Playlist) Analyze(ctx context.Context, path string, preset Preset) e
 
 // Refresh re-analyzes all tracks in the playlist.
 func (list *Playlist) Refresh(ctx context.Context) error {
-	tracks := make([]Track, 0)
+	old := make([]Track, 0)
 
-	if err := list.collection.Load(&tracks); err != nil {
+	if err := list.collection.Load(&old); err != nil {
 		return err
 	}
-
-	fresh := make([]Track, 0)
 
 	// Each job will spawn two goroutines (hash and BPM analysis).
 	var n = runtime.NumCPU() / 2
 
 	log.Println("[workers]", n)
 
-	var mu sync.Mutex
+	out, new, wg := make(chan Track, n), make([]Track, 0), new(sync.WaitGroup)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for t := range out {
+			new = append(new, t)
+		}
+	}()
 
 	do := func(t Track) error {
 		p, _ := PresetFromBPM(t.BPM)
@@ -289,19 +294,23 @@ func (list *Playlist) Refresh(ctx context.Context) error {
 
 		log.Println(t)
 
-		mu.Lock()
-		defer mu.Unlock()
-		fresh = append(fresh, t)
+		out <- t
 
 		return nil
 	}
 
-	if err := each(n, tracks, do); err != nil {
+	if err := each(n, old, do); err != nil {
+		close(out)
+		wg.Wait()
 		return err
 	}
 
-	order(fresh)
-	return list.collection.Save(&fresh)
+	close(out)
+
+	wg.Wait()
+
+	order(new)
+	return list.collection.Save(&new)
 }
 
 // Compile converts all files to a common format and exports them in the given
