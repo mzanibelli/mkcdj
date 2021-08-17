@@ -206,23 +206,22 @@ func (list *Playlist) Files(out io.Writer) error {
 // It is based on the status() function, so this could have more criteria in
 // the near future.
 func (list *Playlist) Prune() error {
-	tracks := make([]Track, 0)
+	old := make([]Track, 0)
 
-	if err := list.collection.Load(&tracks); err != nil {
+	if err := list.collection.Load(&old); err != nil {
 		return err
 	}
 
-	clean := make([]Track, 0)
-	for i := range tracks {
-		if status(tracks[i]) != fail {
-			clean = append(clean, tracks[i])
+	new := make([]Track, 0)
+	for i := range old {
+		if status(old[i]) != fail {
+			new = append(new, old[i])
 		} else {
-			log.Println(tracks[i])
+			log.Println(old[i])
 		}
 	}
 
-	order(clean)
-	return list.collection.Save(&clean)
+	return list.collection.Save(&new)
 }
 
 // Analyze adds a track to the playlist and computes its BPM.
