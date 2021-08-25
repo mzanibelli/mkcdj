@@ -8,7 +8,7 @@ import (
 
 var (
 	a = [...]string{"ffmpeg", "-v", "quiet", "-i", "pipe:0", "-f", "f32le", "-ac", "1", "-ar", "44100", "pipe:1"}
-	b = [...]string{"ffmpeg", "-v", "quiet", "-i", "pipe:0", "-f", "wav", "-ac", "2", "-ar", "44100", "-acodec", "pcm_s24le", "pipe:1"}
+	b = [...]string{"ffmpeg", "-v", "quiet", "-i", "pipe:0", "-f", "wav", "-map_metadata", "-1", "-bitexact", "-ac", "2", "-ar", "44100", "-acodec", "pcm_s24le", "pipe:1"}
 	c = [...]string{"ffmpeg", "-v", "quiet", "-i", "pipe:0", "-lavfi", "showwavespic=s=4096x2048:colors=#5294E2", "-f", "image2", "pipe:1"}
 	d = [...]string{"ffmpeg", "-v", "quiet", "-i", "pipe:0", "-lavfi", "showspectrumpic=s=4096x2048:color=cool:start=0:stop=24000", "-f", "image2", "pipe:1"}
 )
