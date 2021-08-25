@@ -5,13 +5,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -100,15 +98,15 @@ type Repository interface {
 
 // Pipeline is an external Unix pipeline.
 type Pipeline interface {
-	Command(context.Context) *exec.Cmd
+	Run(context.Context, io.Reader, io.Writer, io.Writer) error
 }
 
 // PipelineFunc is a function implementation of Pipeline.
-type PipelineFunc func(context.Context) *exec.Cmd
+type PipelineFunc func(context.Context, io.Reader, io.Writer, io.Writer) error
 
 // Command implements Pipeline for PipelineFunc.
-func (f PipelineFunc) Command(ctx context.Context) *exec.Cmd {
-	return f(ctx)
+func (f PipelineFunc) Run(ctx context.Context, in io.Reader, out, err io.Writer) error {
+	return f(ctx, in, out, err)
 }
 
 // New returns a new Playlist.
@@ -131,17 +129,17 @@ func WithRepository(r Repository) Option {
 }
 
 // WithPipeline configures one of the pipelines.
-func WithPipeline(name string, f func(context.Context) *exec.Cmd) Option {
+func WithPipeline(name string, p Pipeline) Option {
 	return func(list *Playlist) {
 		switch name {
 		case "analyze":
-			list.analyze = PipelineFunc(f)
+			list.analyze = p
 		case "convert":
-			list.convert = PipelineFunc(f)
+			list.convert = p
 		case "waveform":
-			list.waveform = PipelineFunc(f)
+			list.waveform = p
 		case "spectrum":
-			list.spectrum = PipelineFunc(f)
+			list.spectrum = p
 		default:
 			panic("unknown pipeline")
 		}
@@ -545,37 +543,23 @@ func build(ctx context.Context, src, dst string, p Pipeline) error {
 	}
 	defer out.Close()
 
-	r, w := bufio.NewReader(in), bufio.NewWriter(out)
-
-	if err := run(ctx, p, r, w); err != nil {
-		return err
-	}
-
-	return w.Flush()
+	return run(ctx, p, in, out)
 }
 
 func run(parent context.Context, p Pipeline, stdin io.Reader, stdout io.Writer) error {
-	const pipelineTimeout = 1 * time.Minute
-
-	ctx, cancel := context.WithTimeout(parent, pipelineTimeout)
+	ctx, cancel := context.WithTimeout(parent, 1*time.Minute)
 	defer cancel()
-
-	cmd := p.Command(ctx)
 
 	stderr := bytes.NewBuffer(nil)
 
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	err := p.Run(ctx, stdin, stdout, stderr)
 
-	line, err := stderr.ReadString(0x0A)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return err
-	}
-
+	line, _ := stderr.ReadString(0x0A)
 	if message := strings.TrimSpace(line); message != "" {
 		log.Println(message)
 	}
 
-	return cmd.Run()
+	return err
 }
 
 const (

@@ -6,40 +6,32 @@ import (
 	"io"
 	"mkcdj/ffmpeg"
 	"os"
-	"os/exec"
 	"testing"
 	"time"
 )
 
 func TestFFMPEG(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	t.Run("analyze", run(ffmpeg.F32LE(ctx)))
-	t.Run("convert", run(ffmpeg.AudioOut(ctx)))
-	t.Run("waveform", run(ffmpeg.PNGWaveform(ctx)))
-	t.Run("spectrum", run(ffmpeg.PNGSpectrum(ctx)))
+	t.Run("analyze", run(ffmpeg.F32LE))
+	t.Run("convert", run(ffmpeg.AudioOut))
+	t.Run("waveform", run(ffmpeg.PNGWaveform))
+	t.Run("spectrum", run(ffmpeg.PNGSpectrum))
 }
 
-func run(cmd *exec.Cmd) func(t *testing.T) {
+func run(f func(context.Context, io.Reader, io.Writer, io.Writer) error) func(t *testing.T) {
 	return func(t *testing.T) {
-		fd, err := os.Open("./testdata/track.wav")
+		in, err := os.Open("./testdata/track.wav")
 		if err != nil {
 			t.Error(err)
 		}
-		defer fd.Close()
+		defer in.Close()
 
 		stderr := bytes.NewBuffer(nil)
 
-		cmd.Stdin = fd
-		cmd.Stdout = io.Discard
-		cmd.Stderr = stderr
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 
-		err = cmd.Run()
-
-		t.Log(stderr.String())
-
-		if err != nil {
+		if err := f(ctx, in, io.Discard, stderr); err != nil {
+			t.Log(stderr.String())
 			t.Error(err)
 		}
 	}

@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"mkcdj"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,7 +36,7 @@ func TestAnalyze(t *testing.T) {
 
 	SUT := mkcdj.New(
 		mkcdj.WithRepository(repo),
-		mkcdj.WithPipeline("analyze", stubAnalyze),
+		mkcdj.WithPipeline("analyze", writeOk),
 		mkcdj.WithBPMScanFunc(stubBPMScanner),
 	)
 
@@ -99,7 +98,7 @@ func TestRefresh(t *testing.T) {
 
 	SUT := mkcdj.New(
 		mkcdj.WithRepository(repo),
-		mkcdj.WithPipeline("analyze", stubAnalyze),
+		mkcdj.WithPipeline("analyze", writeOk),
 		mkcdj.WithBPMScanFunc(stubBPMScanner),
 	)
 
@@ -157,9 +156,9 @@ func TestCompile(t *testing.T) {
 
 	SUT := mkcdj.New(
 		mkcdj.WithRepository(repo),
-		mkcdj.WithPipeline("convert", stubConvert),
-		mkcdj.WithPipeline("waveform", stubWaveform),
-		mkcdj.WithPipeline("spectrum", stubSpectrogram),
+		mkcdj.WithPipeline("convert", writeOk),
+		mkcdj.WithPipeline("waveform", writeOk),
+		mkcdj.WithPipeline("spectrum", writeOk),
 	)
 
 	if err := SUT.Compile(context.Background(), dir); err != nil {
@@ -207,9 +206,11 @@ type fakeRepository struct{ buf *bytes.Buffer }
 func (r *fakeRepository) Load(v interface{}) error { return json.NewDecoder(r.buf).Decode(v) }
 func (r *fakeRepository) Save(v interface{}) error { return json.NewEncoder(r.buf).Encode(v) }
 
-func stubAnalyze(context.Context) *exec.Cmd     { return exec.Command("echo", "ok") }
-func stubConvert(context.Context) *exec.Cmd     { return exec.Command("echo", "ok") }
-func stubWaveform(context.Context) *exec.Cmd    { return exec.Command("echo", "ok") }
-func stubSpectrogram(context.Context) *exec.Cmd { return exec.Command("echo", "ok") }
+var writeOk = mkcdj.PipelineFunc(stubCmd)
+
+func stubCmd(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) error {
+	_, err := stdout.Write([]byte("ok"))
+	return err
+}
 
 func stubBPMScanner(r io.Reader, min, max float64) (float64, error) { return 100, nil }
