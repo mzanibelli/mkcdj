@@ -36,7 +36,7 @@ func TestAnalyze(t *testing.T) {
 
 	SUT := mkcdj.New(
 		mkcdj.WithRepository(repo),
-		mkcdj.WithPipeline("analyze", writeOk),
+		mkcdj.WithPipeline(mkcdj.Analyze, writeOk),
 		mkcdj.WithBPMScanFunc(stubBPMScanner),
 	)
 
@@ -98,7 +98,7 @@ func TestRefresh(t *testing.T) {
 
 	SUT := mkcdj.New(
 		mkcdj.WithRepository(repo),
-		mkcdj.WithPipeline("analyze", writeOk),
+		mkcdj.WithPipeline(mkcdj.Analyze, writeOk),
 		mkcdj.WithBPMScanFunc(stubBPMScanner),
 	)
 
@@ -156,9 +156,9 @@ func TestCompile(t *testing.T) {
 
 	SUT := mkcdj.New(
 		mkcdj.WithRepository(repo),
-		mkcdj.WithPipeline("convert", writeOk),
-		mkcdj.WithPipeline("waveform", writeOk),
-		mkcdj.WithPipeline("spectrum", writeOk),
+		mkcdj.WithPipeline(mkcdj.Convert, writeOk),
+		mkcdj.WithPipeline(mkcdj.Waveform, writeOk),
+		mkcdj.WithPipeline(mkcdj.Spectrum, writeOk),
 	)
 
 	if err := SUT.Compile(context.Background(), dir); err != nil {

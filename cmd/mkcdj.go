@@ -102,10 +102,10 @@ var repo = mkcdj.WithRepository(
 
 var opts = [...]mkcdj.Option{
 	repo,
-	mkcdj.WithPipeline("analyze", mkcdj.PipelineFunc(ffmpeg.F32LE)),
-	mkcdj.WithPipeline("convert", mkcdj.PipelineFunc(ffmpeg.AudioOut)),
-	mkcdj.WithPipeline("waveform", mkcdj.PipelineFunc(ffmpeg.PNGWaveform)),
-	mkcdj.WithPipeline("spectrum", mkcdj.PipelineFunc(ffmpeg.PNGSpectrum)),
+	mkcdj.WithPipeline(mkcdj.Analyze, mkcdj.PipelineFunc(ffmpeg.F32LE)),
+	mkcdj.WithPipeline(mkcdj.Convert, mkcdj.PipelineFunc(ffmpeg.AudioOut)),
+	mkcdj.WithPipeline(mkcdj.Waveform, mkcdj.PipelineFunc(ffmpeg.PNGWaveform)),
+	mkcdj.WithPipeline(mkcdj.Spectrum, mkcdj.PipelineFunc(ffmpeg.PNGSpectrum)),
 	mkcdj.WithBPMScanFunc(bpm.Scan),
 }
 

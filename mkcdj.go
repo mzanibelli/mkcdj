@@ -83,10 +83,7 @@ func PresetFromBPM(bpm float64) (Preset, error) {
 // Playlist is a DJ playlist.
 type Playlist struct {
 	collection Repository
-	analyze    Pipeline
-	convert    Pipeline
-	waveform   Pipeline
-	spectrum   Pipeline
+	pipelines  [4]Pipeline
 	scanner    BPMScanner
 }
 
@@ -128,21 +125,20 @@ func WithRepository(r Repository) Option {
 	}
 }
 
+// A codec is a way of transcoding the signal.
+type codec int
+
+const (
+	Analyze  codec = iota // Prepare audio file for BPM analysis.
+	Convert               // Convert to final format.
+	Waveform              // Generate waveform picture.
+	Spectrum              // Generate spectrogram picture.
+)
+
 // WithPipeline configures one of the pipelines.
-func WithPipeline(name string, p Pipeline) Option {
+func WithPipeline(c codec, p Pipeline) Option {
 	return func(list *Playlist) {
-		switch name {
-		case "analyze":
-			list.analyze = p
-		case "convert":
-			list.convert = p
-		case "waveform":
-			list.waveform = p
-		case "spectrum":
-			list.spectrum = p
-		default:
-			panic("unknown pipeline")
-		}
+		list.pipelines[c] = p
 	}
 }
 
@@ -235,7 +231,7 @@ func (list *Playlist) Analyze(ctx context.Context, path string, preset Preset) e
 		return err
 	}
 
-	track, err := track(ctx, abs, preset, list.analyze, list.scanner)
+	track, err := track(ctx, abs, preset, list.pipelines[Analyze], list.scanner)
 	if err != nil {
 		return err
 	}
@@ -284,7 +280,7 @@ func (list *Playlist) Refresh(ctx context.Context) error {
 	do := func(t Track) error {
 		p, _ := PresetFromBPM(t.BPM)
 
-		t, err := track(ctx, t.Path, p, list.analyze, list.scanner)
+		t, err := track(ctx, t.Path, p, list.pipelines[Analyze], list.scanner)
 		if err != nil {
 			return err
 		}
@@ -330,7 +326,11 @@ func (list *Playlist) Compile(ctx context.Context, path string) error {
 	log.Println("[workers]", n)
 
 	do := func(t Track) error {
-		return convert(ctx, dir, t, list.convert, list.waveform, list.spectrum)
+		return convert(ctx, dir, t,
+			list.pipelines[Convert],
+			list.pipelines[Waveform],
+			list.pipelines[Spectrum],
+		)
 	}
 
 	if err := each(n, tracks, do); err != nil {
