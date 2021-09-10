@@ -46,11 +46,11 @@ func run(args ...string) error {
 	case args[0] == "refresh" && len(args) == 1:
 		return refresh(ctx)
 	case args[0] == "list" && len(args) == 1:
-		return list(ctx, os.Stdout)
+		return list(os.Stdout)
 	case args[0] == "files" && len(args) == 1:
-		return files(ctx, os.Stdout)
+		return files(os.Stdout)
 	case args[0] == "prune" && len(args) == 1:
-		return prune(ctx)
+		return prune()
 	default:
 		return errUsage
 	}
@@ -73,15 +73,15 @@ func refresh(ctx context.Context) error {
 	return mkcdj.New(opts[:]...).Refresh(ctx)
 }
 
-func list(ctx context.Context, out io.Writer) error {
+func list(out io.Writer) error {
 	return mkcdj.New(repo).List(out)
 }
 
-func files(ctx context.Context, out io.Writer) error {
+func files(out io.Writer) error {
 	return mkcdj.New(repo).Files(out)
 }
 
-func prune(ctx context.Context) error {
+func prune() error {
 	return mkcdj.New(repo).Prune()
 }
 

@@ -206,16 +206,16 @@ func (list *Playlist) Prune() error {
 		return err
 	}
 
-	new := make([]Track, 0)
+	tracks := make([]Track, 0)
 	for i := range old {
 		if status(old[i]) != fail {
-			new = append(new, old[i])
+			tracks = append(tracks, old[i])
 		} else {
 			log.Println(old[i])
 		}
 	}
 
-	return list.collection.Save(&new)
+	return list.collection.Save(&tracks)
 }
 
 // Analyze adds a track to the playlist and computes its BPM.
@@ -268,12 +268,12 @@ func (list *Playlist) Refresh(ctx context.Context) error {
 
 	log.Println("[workers]", n)
 
-	out, new, wg := make(chan Track, n), make([]Track, 0), new(sync.WaitGroup)
+	out, tracks, wg := make(chan Track, n), make([]Track, 0), new(sync.WaitGroup)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for t := range out {
-			new = append(new, t)
+			tracks = append(tracks, t)
 		}
 	}()
 
@@ -302,8 +302,8 @@ func (list *Playlist) Refresh(ctx context.Context) error {
 
 	wg.Wait()
 
-	order(new)
-	return list.collection.Save(&new)
+	order(tracks)
+	return list.collection.Save(&tracks)
 }
 
 // Compile converts all files to a common format and exports them in the given
