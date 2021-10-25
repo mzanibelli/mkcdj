@@ -11,7 +11,7 @@ import (
 
 var (
 	a = [...]string{"-v", "quiet", "-y", "-f", "f32le", "-ac", "1", "-ar", "44100"}
-	b = [...]string{"-v", "quiet", "-y", "-f", "wav", "-map_metadata", "-1", "-bitexact", "-ac", "2", "-ar", "44100", "-acodec", "pcm_s24le"}
+	b = [...]string{"-v", "quiet", "-y", "-f", "wav", "-map_metadata", "-1", "-bitexact", "-ac", "2", "-ar", "44100"}
 	c = [...]string{"-v", "quiet", "-y", "-lavfi", "showwavespic=s=4096x2048:colors=#5294E2", "-f", "image2"}
 	d = [...]string{"-v", "quiet", "-y", "-lavfi", "showspectrumpic=s=4096x2048:color=cool:start=0:stop=24000", "-f", "image2"}
 )

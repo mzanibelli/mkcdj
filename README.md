@@ -34,7 +34,11 @@ You can also pass a BPM value instead of a named preset. In that case the system
 
 ## Export format
 
-All files are exported in WAV 24 bits 44100Hz.
+All files are exported in WAV 16 bits 44100Hz.
+We do not want 24 or 32 bits WAV because FFMPEG would use the WAVEFORMATEXTENSIBLE format which is not widely compatible.
+Only WAVE_FORMAT_PCM works everywhere but in theory bit depths larger than 16 are not supported (even though most of the DAWs and DJ software do).
+
+See [this issue](https://trac.ffmpeg.org/ticket/4426) for more info.
 
 Additionally, waveform and spectrogram pictures of each file are generated in separate directories.
 
