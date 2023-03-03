@@ -40,7 +40,7 @@ var (
 	DNB     = Preset{165, 179.99}
 	Jungle  = Preset{148, 164.99}
 	Dubstep = Preset{138, 147.99}
-	Garage  = Preset{130, 137.99}
+	Techno  = Preset{130, 137.99}
 	House   = Preset{115, 129.99}
 	Default = Preset{060, 114.99}
 )
@@ -50,7 +50,7 @@ var presets = map[string]Preset{
 	"dnb":     DNB,
 	"jungle":  Jungle,
 	"dubstep": Dubstep,
-	"garage":  Garage,
+	"techno":  Techno,
 	"house":   House,
 }
 
@@ -89,8 +89,8 @@ type Playlist struct {
 
 // Repository holds the track collection.
 type Repository interface {
-	Save(v interface{}) error
-	Load(v interface{}) error
+	Save(v any) error
+	Load(v any) error
 }
 
 // Pipeline is an external Unix pipeline.
