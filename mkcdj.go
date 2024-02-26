@@ -61,6 +61,12 @@ func (p *Preset) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &name); err != nil {
 		return err
 	}
+
+	if name == "" {
+		*p = Presets[0]
+		return nil
+	}
+
 	var err error
 	*p, err = PresetFromName(name)
 	return err
