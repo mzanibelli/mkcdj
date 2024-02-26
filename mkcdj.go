@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -120,15 +121,9 @@ func PresetFromName(name string) (Preset, error) {
 
 // Playlist is a DJ playlist.
 type Playlist struct {
-	collection Repository
-	pipelines  [4]Pipeline
-	scanner    BPMScanner
-}
-
-// Repository holds the track collection.
-type Repository interface {
-	Save(v any) error
-	Load(v any) error
+	path      string
+	pipelines [4]Pipeline
+	scanner   BPMScanner
 }
 
 // Pipeline is an external Unix pipeline.
@@ -157,9 +152,9 @@ func New(opts ...Option) *Playlist {
 type Option func(*Playlist)
 
 // WithRepository configures the repository used to persist data.
-func WithRepository(r Repository) Option {
+func WithRepository(path string) Option {
 	return func(list *Playlist) {
-		list.collection = r
+		list.path = path
 	}
 }
 
@@ -202,186 +197,161 @@ func WithBPMScanFunc(f func(r io.Reader, min, max float64) (float64, error)) Opt
 
 // List pretty-prints the current playlist.
 func (list *Playlist) List(out io.Writer) error {
-	tracks := make([]Track, 0)
-
-	if err := list.collection.Load(&tracks); err != nil {
-		return err
-	}
-
-	for _, t := range tracks {
-		if _, err := fmt.Fprintln(out, t); err != nil {
-			return err
+	return withJSONFile(list.path, func(tracks []Track) ([]Track, error) {
+		for _, t := range tracks {
+			if _, err := fmt.Fprintln(out, t); err != nil {
+				return nil, err
+			}
 		}
-	}
-
-	return nil
+		return tracks, nil
+	})
 }
 
 // Files prints all the absolute file paths, one per line.
 func (list *Playlist) Files(out io.Writer) error {
-	tracks := make([]Track, 0)
-
-	if err := list.collection.Load(&tracks); err != nil {
-		return err
-	}
-
-	for _, t := range tracks {
-		if _, err := fmt.Fprintln(out, t.Path); err != nil {
-			return err
+	return withJSONFile(list.path, func(tracks []Track) ([]Track, error) {
+		for _, t := range tracks {
+			if _, err := fmt.Fprintln(out, t.Path); err != nil {
+				return nil, err
+			}
 		}
-	}
-
-	return nil
+		return tracks, nil
+	})
 }
 
 // Prune remove files that are not a their reported location anymore.
 // It is based on the status() function, so this could have more criteria in
 // the near future.
 func (list *Playlist) Prune() error {
-	old := make([]Track, 0)
-
-	if err := list.collection.Load(&old); err != nil {
-		return err
-	}
-
-	tracks := make([]Track, 0)
-	for i := range old {
-		if status(old[i]) != fail {
-			tracks = append(tracks, old[i])
-		} else {
-			log.Println(old[i])
+	return withJSONFile(list.path, func(old []Track) ([]Track, error) {
+		tracks := make([]Track, 0)
+		for i := range old {
+			if status(old[i]) != fail {
+				tracks = append(tracks, old[i])
+			} else {
+				log.Println(old[i])
+			}
 		}
-	}
-
-	return list.collection.Save(&tracks)
+		return tracks, nil
+	})
 }
 
 // Analyze adds a track to the playlist and computes its BPM.
 func (list *Playlist) Analyze(ctx context.Context, path string, preset Preset) error {
-	tracks := make([]Track, 0)
-
-	if err := list.collection.Load(&tracks); err != nil {
-		return err
-	}
-
-	abs, err := filepath.Abs(filepath.Clean(path))
-	if err != nil {
-		return err
-	}
-
-	track, err := track(ctx, abs, preset, list.pipelines[Analyze], list.scanner)
-	if err != nil {
-		return err
-	}
-
-	var found bool
-	for i := range tracks {
-		if tracks[i].Hash == track.Hash {
-			tracks[i] = track
-			found = true
-			break
+	return withJSONFile(list.path, func(tracks []Track) ([]Track, error) {
+		abs, err := filepath.Abs(filepath.Clean(path))
+		if err != nil {
+			return nil, err
 		}
-	}
 
-	if !found {
-		tracks = append(tracks, track)
-	}
+		track, err := track(ctx, abs, preset, list.pipelines[Analyze], list.scanner)
+		if err != nil {
+			return nil, err
+		}
 
-	log.Println(track)
+		var found bool
+		for i := range tracks {
+			if tracks[i].Hash == track.Hash {
+				tracks[i] = track
+				found = true
+				break
+			}
+		}
 
-	order(tracks)
-	return list.collection.Save(&tracks)
+		if !found {
+			tracks = append(tracks, track)
+		}
+
+		log.Println(track)
+
+		order(tracks)
+
+		return tracks, nil
+	})
 }
 
 // Refresh re-analyzes all tracks in the playlist.
 func (list *Playlist) Refresh(ctx context.Context) error {
-	old := make([]Track, 0)
+	return withJSONFile(list.path, func(old []Track) ([]Track, error) {
+		// Each job will spawn two goroutines (hash and BPM analysis).
+		var n = runtime.NumCPU() / 2
 
-	if err := list.collection.Load(&old); err != nil {
-		return err
-	}
+		log.Println("[workers]", n)
 
-	// Each job will spawn two goroutines (hash and BPM analysis).
-	var n = runtime.NumCPU() / 2
+		out, tracks, wg := make(chan Track, n), make([]Track, 0), new(sync.WaitGroup)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for t := range out {
+				tracks = append(tracks, t)
+			}
+		}()
 
-	log.Println("[workers]", n)
+		do := func(t Track) error {
+			// Recompute the appropriate preset from the last known BPM. It allows to
+			// change and move preset layout around freely.
+			if t.Preset.Name == "" {
+				t.Preset, _ = PresetFromBPM(t.BPM)
+			}
 
-	out, tracks, wg := make(chan Track, n), make([]Track, 0), new(sync.WaitGroup)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for t := range out {
-			tracks = append(tracks, t)
+			t, err := track(ctx, t.Path, t.Preset, list.pipelines[Analyze], list.scanner)
+			if err != nil {
+				return err
+			}
+
+			log.Println(t)
+
+			out <- t
+
+			return nil
 		}
-	}()
 
-	do := func(t Track) error {
-		// Recompute the appropriate preset from the last known BPM. It allows to
-		// change and move preset layout around freely.
-		if t.Preset.Name == "" {
-			t.Preset, _ = PresetFromBPM(t.BPM)
+		if err := each(n, old, do); err != nil {
+			close(out)
+			wg.Wait()
+			return nil, err
 		}
 
-		t, err := track(ctx, t.Path, t.Preset, list.pipelines[Analyze], list.scanner)
-		if err != nil {
-			return err
-		}
-
-		log.Println(t)
-
-		out <- t
-
-		return nil
-	}
-
-	if err := each(n, old, do); err != nil {
 		close(out)
+
 		wg.Wait()
-		return err
-	}
 
-	close(out)
+		order(tracks)
 
-	wg.Wait()
-
-	order(tracks)
-	return list.collection.Save(&tracks)
+		return tracks, nil
+	})
 }
 
 // Compile converts all files to a common format and exports them in the given
 // directory classified by BPM.
 func (list *Playlist) Compile(ctx context.Context, path string) error {
-	tracks := make([]Track, 0)
+	return withJSONFile(list.path, func(tracks []Track) ([]Track, error) {
+		dir, err := os.MkdirTemp(filepath.Clean(path), "mkcdj-*")
+		if err != nil {
+			return nil, err
+		}
 
-	if err := list.collection.Load(&tracks); err != nil {
-		return err
-	}
+		// Each job will spawn three FFMPEG processes.
+		var n = runtime.NumCPU() / 3
 
-	dir, err := os.MkdirTemp(filepath.Clean(path), "mkcdj-*")
-	if err != nil {
-		return err
-	}
+		log.Println("[workers]", n)
 
-	// Each job will spawn three FFMPEG processes.
-	var n = runtime.NumCPU() / 3
+		do := func(t Track) error {
+			return convert(ctx, dir, t,
+				list.pipelines[Convert],
+				list.pipelines[Waveform],
+				list.pipelines[Spectrum],
+			)
+		}
 
-	log.Println("[workers]", n)
+		if err := each(n, tracks, do); err != nil {
+			return nil, err
+		}
 
-	do := func(t Track) error {
-		return convert(ctx, dir, t,
-			list.pipelines[Convert],
-			list.pipelines[Waveform],
-			list.pipelines[Spectrum],
-		)
-	}
+		log.Println("[done]", dir)
 
-	if err := each(n, tracks, do); err != nil {
-		return err
-	}
-
-	log.Println("[done]", dir)
-
-	return nil
+		return tracks, nil
+	})
 }
 
 func order(tracks []Track) {
@@ -615,4 +585,37 @@ func status(t Track) string {
 	default:
 		return good
 	}
+}
+
+func withJSONFile[T any](path string, f func(data T) (T, error)) error {
+	file, err := os.OpenFile(filepath.Clean(path), os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil {
+		return fmt.Errorf("could not open file at path %q: %w", path, err)
+	}
+	defer file.Close()
+
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("could not acquire exclusive lock on file at path %q: %w", path, err)
+	}
+	defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+
+	var data T
+	if err := json.NewDecoder(file).Decode(&data); err != nil {
+		return fmt.Errorf("could not decode data in file at path %q: %w", path, err)
+	}
+
+	replace, err := f(data)
+	if err != nil {
+		return err
+	}
+
+	if err := file.Truncate(0); err != nil {
+		return fmt.Errorf("could not truncate file at path %q: %w", path, err)
+	}
+
+	if _, err := file.Seek(0, 0); err != nil {
+		return fmt.Errorf("could not seek to beginning of file at path %q: %w", path, err)
+	}
+
+	return json.NewEncoder(file).Encode(replace)
 }

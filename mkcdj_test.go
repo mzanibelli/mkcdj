@@ -1,7 +1,6 @@
 package mkcdj_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -31,11 +30,13 @@ func TestAnalyze(t *testing.T) {
 	}
 	defer fd.Close()
 
-	repo := new(fakeRepository)
-	repo.buf = bytes.NewBufferString("[]")
+	repoPath := filepath.Join(os.TempDir(), "/mkcdj.json")
+	if err := os.WriteFile(repoPath, []byte("[]"), 0666); err != nil {
+		t.Error(err)
+	}
 
 	SUT := mkcdj.New(
-		mkcdj.WithRepository(repo),
+		mkcdj.WithRepository(repoPath),
 		mkcdj.WithPipeline(mkcdj.Analyze, writeOk),
 		mkcdj.WithBPMScanFunc(stubBPMScanner),
 	)
@@ -50,11 +51,14 @@ func TestAnalyze(t *testing.T) {
 		t.Error(err)
 	}
 
-	t.Log(repo.buf.String())
-
 	tracks := make([]mkcdj.Track, 0)
 
-	if err := repo.Load(&tracks); err != nil {
+	data, err := os.ReadFile(repoPath)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if err := json.Unmarshal(data, &tracks); err != nil {
 		t.Error(err)
 	}
 
@@ -90,15 +94,18 @@ func TestRefresh(t *testing.T) {
 
 	tracks := []mkcdj.Track{track}
 
-	repo := new(fakeRepository)
-	repo.buf = bytes.NewBuffer(nil)
+	payload, err := json.Marshal(tracks)
+	if err != nil {
+		t.Error(err)
+	}
 
-	if err := repo.Save(&tracks); err != nil {
+	repoPath := filepath.Join(os.TempDir(), "/mkcdj.json")
+	if err := os.WriteFile(repoPath, payload, 0666); err != nil {
 		t.Error(err)
 	}
 
 	SUT := mkcdj.New(
-		mkcdj.WithRepository(repo),
+		mkcdj.WithRepository(repoPath),
 		mkcdj.WithPipeline(mkcdj.Analyze, writeOk),
 		mkcdj.WithBPMScanFunc(stubBPMScanner),
 	)
@@ -109,11 +116,14 @@ func TestRefresh(t *testing.T) {
 		t.Error(err)
 	}
 
-	t.Log(repo.buf.String())
-
 	tracks = make([]mkcdj.Track, 0)
 
-	if err := repo.Load(&tracks); err != nil {
+	data, err := os.ReadFile(repoPath)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if err := json.Unmarshal(data, &tracks); err != nil {
 		t.Error(err)
 	}
 
@@ -149,15 +159,18 @@ func TestCompile(t *testing.T) {
 
 	tracks := []mkcdj.Track{track}
 
-	repo := new(fakeRepository)
-	repo.buf = bytes.NewBuffer(nil)
+	payload, err := json.Marshal(tracks)
+	if err != nil {
+		t.Error(err)
+	}
 
-	if err := repo.Save(&tracks); err != nil {
+	repoPath := filepath.Join(os.TempDir(), "/mkcdj.json")
+	if err := os.WriteFile(repoPath, payload, 0666); err != nil {
 		t.Error(err)
 	}
 
 	SUT := mkcdj.New(
-		mkcdj.WithRepository(repo),
+		mkcdj.WithRepository(repoPath),
 		mkcdj.WithPipeline(mkcdj.Convert, writeOk),
 		mkcdj.WithPipeline(mkcdj.Waveform, writeOk),
 		mkcdj.WithPipeline(mkcdj.Spectrum, writeOk),
@@ -202,11 +215,6 @@ func assert(t *testing.T, want, got string) {
 		t.Errorf("want: %s, got: %s", want, got)
 	}
 }
-
-type fakeRepository struct{ buf *bytes.Buffer }
-
-func (r *fakeRepository) Load(v interface{}) error { return json.NewDecoder(r.buf).Decode(v) }
-func (r *fakeRepository) Save(v interface{}) error { return json.NewEncoder(r.buf).Encode(v) }
 
 var writeOk = mkcdj.PipelineFunc(stubCmd)
 

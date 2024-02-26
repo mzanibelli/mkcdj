@@ -10,7 +10,6 @@ import (
 	"mkcdj"
 	"mkcdj/bpm"
 	"mkcdj/ffmpeg"
-	"mkcdj/repository"
 	"os"
 	"strconv"
 )
@@ -96,9 +95,7 @@ usage:
 
 var errUsage = errors.New(help)
 
-var repo = mkcdj.WithRepository(
-	repository.JSONFile(env("MKCDJ_STORE", "/tmp/mkcdj.json")),
-)
+var repo = mkcdj.WithRepository(env("MKCDJ_STORE", "/tmp/mkcdj.json"))
 
 var opts = [...]mkcdj.Option{
 	repo,
