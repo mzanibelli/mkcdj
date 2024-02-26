@@ -113,8 +113,6 @@ func lookup(name string) (mkcdj.Preset, error) {
 	switch bpm, err := strconv.ParseFloat(name, 64); {
 	case err == nil:
 		return mkcdj.PresetFromBPM(bpm)
-	case name == "default":
-		return mkcdj.Default, nil
 	default:
 		return mkcdj.PresetFromName(name)
 	}

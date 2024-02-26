@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -20,9 +21,10 @@ import (
 
 // Track is an audio track.
 type Track struct {
-	Path string  `json:"path"`
-	Hash string  `json:"hash"`
-	BPM  float64 `json:"bpm"`
+	Path   string  `json:"path"`
+	Hash   string  `json:"hash"`
+	Preset Preset  `json:"preset"`
+	BPM    float64 `json:"bpm"`
 }
 
 // String implements fmt.Stringer for Track.
@@ -30,28 +32,42 @@ func (t Track) String() string {
 	return fmt.Sprintf("[%s] [%.0f] %s", status(t), math.Round(t.BPM), filepath.Base(t.Path))
 }
 
-// Preset is a BPM range preset.
-type Preset struct {
-	Min float64
-	Max float64
+// Presets is the list of available presets.
+// It must have at least one element being the default preset at index 0.
+var Presets = [...]Preset{
+	Preset{"default", 40, 220}, // Largo to Prestissimo.
+
+	Preset{"dnb", 165, 179.99},
+	Preset{"jungle", 148, 164.99},
+	Preset{"dubstep", 138, 147.99},
+	Preset{"techno", 128, 137.99},
+	Preset{"house", 115, 129.99},
+	Preset{"hiphop", 60, 114.99},
+	Preset{"dub", 60, 89.99},
 }
 
-var (
-	DNB     = Preset{165, 179.99}
-	Jungle  = Preset{148, 164.99}
-	Dubstep = Preset{138, 147.99}
-	Techno  = Preset{130, 137.99}
-	House   = Preset{115, 129.99}
-	Default = Preset{060, 114.99}
-)
+// Preset is a BPM range preset.
+type Preset struct {
+	Name string
+	Min  float64
+	Max  float64
+}
 
-// Internal list used for lookup.
-var presets = map[string]Preset{
-	"dnb":     DNB,
-	"jungle":  Jungle,
-	"dubstep": Dubstep,
-	"techno":  Techno,
-	"house":   House,
+// UnmarshalJSON implements json.Unmarshaler for Preset.
+// If the preset is empty, the default preset is silently returned.
+func (p *Preset) UnmarshalJSON(data []byte) error {
+	var name string
+	if err := json.Unmarshal(data, &name); err != nil {
+		return err
+	}
+	var err error
+	*p, err = PresetFromName(name)
+	return err
+}
+
+// MarshalJSON implements json.Marshaler for Preset.
+func (p *Preset) MarshalJSON() ([]byte, error) {
+	return json.Marshal(p.Name)
 }
 
 // Range returns the BPM range as used for parameter interpolation in the
@@ -61,23 +77,45 @@ func (p Preset) Range() (string, string) {
 	return fmt.Sprintf("%.0f", min), fmt.Sprintf("%.0f", max)
 }
 
-// PresetFromName returns list BPM range preset from its name.
-func PresetFromName(name string) (Preset, error) {
-	if p, ok := presets[name]; ok {
-		return p, nil
+// PresetFromBPM returns the Preset with the narrowest BPM range matching the given value.
+func PresetFromBPM(bpm float64) (Preset, error) {
+	var match Preset
+
+	rounded := math.Round(bpm*100) / 100
+	for _, p := range Presets {
+		// Skip non-matching ranges.
+		if p.Min > rounded || rounded > p.Max {
+			continue
+		}
+
+		// Automatically match the first encountered preset.
+		if match.Name == "" {
+			match = p
+			continue
+		}
+
+		// Replace the match by the narrowest encountered range.
+		if p.Max-p.Min < match.Max-match.Min {
+			match = p
+			continue
+		}
 	}
-	return Default, fmt.Errorf("unknown preset: %s", name)
+
+	if match.Name == "" {
+		return Presets[0], fmt.Errorf("unknown BPM range for value: %.2f", bpm)
+	}
+
+	return match, nil
 }
 
-// PresetFromBPM returns the BPM range matching a given value.
-func PresetFromBPM(bpm float64) (Preset, error) {
-	rounded := math.Round(bpm*100) / 100
-	for _, p := range presets {
-		if p.Min <= rounded && rounded <= p.Max {
+// PresetFromName returns list BPM range preset from its name.
+func PresetFromName(name string) (Preset, error) {
+	for _, p := range Presets {
+		if p.Name == name {
 			return p, nil
 		}
 	}
-	return Default, fmt.Errorf("unknown BPM range for value: %.2f", bpm)
+	return Presets[0], fmt.Errorf("unknown preset: %s", name)
 }
 
 // Playlist is a DJ playlist.
@@ -278,9 +316,13 @@ func (list *Playlist) Refresh(ctx context.Context) error {
 	}()
 
 	do := func(t Track) error {
-		p, _ := PresetFromBPM(t.BPM)
+		// Recompute the appropriate preset from the last known BPM. It allows to
+		// change and move preset layout around freely.
+		if t.Preset.Name == "" {
+			t.Preset, _ = PresetFromBPM(t.BPM)
+		}
 
-		t, err := track(ctx, t.Path, p, list.pipelines[Analyze], list.scanner)
+		t, err := track(ctx, t.Path, t.Preset, list.pipelines[Analyze], list.scanner)
 		if err != nil {
 			return err
 		}
@@ -395,21 +437,10 @@ func each(size int, tracks []Track, do func(t Track) error) error {
 }
 
 func rename(t Track) string {
-	var subdir string
-
-	switch p, _ := PresetFromBPM(t.BPM); {
-	case p != Default:
-		min, max := p.Range()
-		subdir = fmt.Sprintf("%s - %s", min, max)
-	default:
-		subdir = "default"
-	}
-
 	base, ext := filepath.Base(t.Path), filepath.Ext(t.Path)
 	name := base[:len(base)-len(ext)]
 	path := fmt.Sprintf("%.0f - %s", math.Round(t.BPM), name)
-
-	return filepath.Join(subdir, path)
+	return filepath.Join(t.Preset.Name, path)
 }
 
 func track(ctx context.Context, path string, preset Preset, p Pipeline, s BPMScanner) (Track, error) {
@@ -446,7 +477,7 @@ func track(ctx context.Context, path string, preset Preset, p Pipeline, s BPMSca
 		}
 	}
 
-	return Track{Path: path, Hash: <-hc, BPM: <-bc}, nil
+	return Track{Path: path, Hash: <-hc, Preset: preset, BPM: <-bc}, nil
 }
 
 func hash(path string) (string, error) {

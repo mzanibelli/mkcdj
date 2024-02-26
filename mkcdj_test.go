@@ -43,10 +43,10 @@ func TestAnalyze(t *testing.T) {
 	ctx := context.Background()
 
 	// Do the analysis twice to check duplication.
-	if err := SUT.Analyze(ctx, fd.Name(), mkcdj.Default); err != nil {
+	if err := SUT.Analyze(ctx, fd.Name(), mkcdj.Presets[0]); err != nil {
 		t.Error(err)
 	}
-	if err := SUT.Analyze(ctx, fd.Name(), mkcdj.Default); err != nil {
+	if err := SUT.Analyze(ctx, fd.Name(), mkcdj.Presets[0]); err != nil {
 		t.Error(err)
 	}
 
@@ -82,9 +82,10 @@ func TestRefresh(t *testing.T) {
 	defer fd.Close()
 
 	track := mkcdj.Track{
-		Path: fd.Name(),
-		Hash: "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
-		BPM:  100,
+		Path:   fd.Name(),
+		Hash:   "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+		BPM:    100,
+		Preset: mkcdj.Presets[0],
 	}
 
 	tracks := []mkcdj.Track{track}
@@ -140,9 +141,10 @@ func TestCompile(t *testing.T) {
 	}
 
 	track := mkcdj.Track{
-		Path: fd.Name(),
-		Hash: "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
-		BPM:  100,
+		Path:   fd.Name(),
+		Hash:   "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+		BPM:    100,
+		Preset: mkcdj.Presets[0],
 	}
 
 	tracks := []mkcdj.Track{track}
@@ -214,3 +216,24 @@ func stubCmd(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) err
 }
 
 func stubBPMScanner(r io.Reader, min, max float64) (float64, error) { return 100, nil }
+
+func TestSerializaton(t *testing.T) {
+	data := `[{"path":"/foo","hash":"bar","preset":"dnb","bpm":100}]`
+
+	var tracks []mkcdj.Track
+	if err := json.Unmarshal([]byte(data), &tracks); err != nil {
+		t.Error(err)
+	}
+
+	assert(t, "/foo", tracks[0].Path)
+	assert(t, "bar", tracks[0].Hash)
+	assert(t, "dnb", tracks[0].Preset.Name)
+	assert(t, "100", fmt.Sprint(tracks[0].BPM))
+
+	got, err := json.Marshal(&tracks)
+	if err != nil {
+		t.Error(err)
+	}
+
+	assert(t, data, string(got))
+}
