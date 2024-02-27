@@ -36,15 +36,15 @@ func (t Track) String() string {
 // Presets is the list of available presets.
 // It must have at least one element being the default preset at index 0.
 var Presets = [...]Preset{
-	Preset{"default", 40, 220}, // Largo to Prestissimo.
+	{"default", 40, 220}, // Largo to Prestissimo.
 
-	Preset{"dnb", 165, 179.99},
-	Preset{"jungle", 148, 164.99},
-	Preset{"dubstep", 138, 147.99},
-	Preset{"techno", 128, 137.99},
-	Preset{"house", 115, 129.99},
-	Preset{"hiphop", 60, 114.99},
-	Preset{"dub", 60, 89.99},
+	{"dnb", 165, 179.99},
+	{"jungle", 148, 164.99},
+	{"dubstep", 138, 147.99},
+	{"techno", 128, 137.99},
+	{"house", 115, 129.99},
+	{"hiphop", 60, 114.99},
+	{"dub", 60, 89.99},
 }
 
 // Preset is a BPM range preset.
@@ -603,7 +603,7 @@ func withJSONFile[T any](path string, f func(data T) (T, error)) error {
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("could not acquire exclusive lock on file at path %q: %w", path, err)
 	}
-	defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN) //nolint:errcheck
 
 	var data T
 	if err := json.NewDecoder(file).Decode(&data); err != nil {

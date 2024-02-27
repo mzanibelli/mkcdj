@@ -135,7 +135,7 @@ func setup(t *testing.T) (*mkcdj.Playlist, params, func()) {
 	noerr(t, err)
 	noerr(t, fd.Close())
 
-	tracks := []mkcdj.Track{mkcdj.Track{
+	tracks := []mkcdj.Track{{
 		Path:   fd.Name(),
 		Hash:   "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
 		BPM:    100,
