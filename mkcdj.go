@@ -30,7 +30,8 @@ type Track struct {
 
 // String implements fmt.Stringer for Track.
 func (t Track) String() string {
-	return fmt.Sprintf("[%s] [%.0f] %s", status(t), math.Round(t.BPM), filepath.Base(t.Path))
+	return fmt.Sprintf("[%s] [%s] [%.0f] %s",
+		status(t), t.Preset.Name, math.Round(t.BPM), filepath.Base(t.Path))
 }
 
 // Presets is the list of available presets.
@@ -362,12 +363,11 @@ func (list *Playlist) Compile(ctx context.Context, path string) error {
 
 func order(tracks []Track) {
 	sort.SliceStable(tracks, func(i, j int) bool {
-		b1, b2 := math.Round(tracks[i].BPM), math.Round(tracks[j].BPM)
-		if b1 == b2 {
-			f1, f2 := filepath.Base(tracks[i].Path), filepath.Base(tracks[j].Path)
-			return strings.Compare(f1, f2) == -1
+		if p := strings.Compare(tracks[i].Preset.Name, tracks[j].Preset.Name); p != 0 {
+			return p == -1
 		}
-		return b1 < b2
+		f1, f2 := filepath.Base(tracks[i].Path), filepath.Base(tracks[j].Path)
+		return strings.Compare(f1, f2) == -1
 	})
 }
 
