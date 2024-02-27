@@ -13,206 +13,192 @@ import (
 	"testing"
 )
 
+func TestPresets(t *testing.T) {
+	t.Run("it should load the preset by its name", func(t *testing.T) {
+		p, err := mkcdj.PresetFromName("dnb")
+		noerr(t, err)
+		assert(t, "dnb", p.Name)
+	})
+
+	t.Run("it should return an error and the default preset if the name is not found", func(t *testing.T) {
+		p, err := mkcdj.PresetFromName("foo")
+		assert(t, true, err != nil)
+		assert(t, "default", p.Name)
+	})
+
+	t.Run("it should load the preset by its bpm range, using the narrowest encountered range", func(t *testing.T) {
+		p, err := mkcdj.PresetFromBPM(174)
+		noerr(t, err)
+		assert(t, "dnb", p.Name)
+	})
+
+	t.Run("it should return an error and the default preset for unsupported BPM ranges", func(t *testing.T) {
+		p, err := mkcdj.PresetFromBPM(20)
+		assert(t, true, err != nil)
+		assert(t, "default", p.Name)
+	})
+}
+
+func TestSerialization(t *testing.T) {
+	t.Run("it should unserialize and serialize a playlist", func(t *testing.T) {
+		data := `[{"path":"/foo","hash":"bar","preset":"dnb","bpm":100}]`
+
+		var tracks []mkcdj.Track
+		noerr(t, json.Unmarshal([]byte(data), &tracks))
+		assert(t, "/foo", tracks[0].Path)
+		assert(t, "bar", tracks[0].Hash)
+		assert(t, "dnb", tracks[0].Preset.Name)
+		assert(t, 100, tracks[0].BPM)
+
+		got, err := json.Marshal(&tracks)
+		noerr(t, err)
+		assert(t, data, string(got))
+	})
+
+	t.Run("it should use the default preset if the track preset is empty", func(t *testing.T) {
+		data := `[{"path":"/foo","hash":"bar","preset":"","bpm":100}]`
+
+		var tracks []mkcdj.Track
+		noerr(t, json.Unmarshal([]byte(data), &tracks))
+		assert(t, "default", tracks[0].Preset.Name)
+	})
+}
+
 func TestAnalyze(t *testing.T) {
-	dir, err := os.MkdirTemp(os.TempDir(), "mkcdj-analyze-*")
-	if err != nil {
-		t.Error(err)
-	}
-	defer os.RemoveAll(dir)
-
-	fd, err := os.CreateTemp(dir, "mkcdj-analyze-source-*.flac")
-	if err != nil {
-		t.Error(err)
-	}
-
-	if _, err := fmt.Fprintln(fd, "hello"); err != nil {
-		t.Error(err)
-	}
-	defer fd.Close()
-
-	repoPath := filepath.Join(os.TempDir(), "/mkcdj.json")
-	if err := os.WriteFile(repoPath, []byte("[]"), 0666); err != nil {
-		t.Error(err)
-	}
-
-	SUT := mkcdj.New(
-		mkcdj.WithRepository(repoPath),
-		mkcdj.WithPipeline(mkcdj.Analyze, writeOk),
-		mkcdj.WithBPMScanFunc(stubBPMScanner),
-	)
-
-	ctx := context.Background()
+	SUT, params, teardown := setup(t)
+	t.Cleanup(teardown)
 
 	// Do the analysis twice to check duplication.
-	if err := SUT.Analyze(ctx, fd.Name(), mkcdj.Presets[0]); err != nil {
-		t.Error(err)
-	}
-	if err := SUT.Analyze(ctx, fd.Name(), mkcdj.Presets[0]); err != nil {
-		t.Error(err)
-	}
+	noerr(t, SUT.Analyze(context.Background(), params.SourceFilePath, mkcdj.Presets[0]))
+	noerr(t, SUT.Analyze(context.Background(), params.SourceFilePath, mkcdj.Presets[0]))
 
-	tracks := make([]mkcdj.Track, 0)
+	tracks := loadPlaylist(t, params.PlaylistFilePath)
 
-	data, err := os.ReadFile(repoPath)
-	if err != nil {
-		t.Error(err)
-	}
-
-	if err := json.Unmarshal(data, &tracks); err != nil {
-		t.Error(err)
-	}
-
-	assert(t, "1", fmt.Sprint(len(tracks)))
-	assert(t, fd.Name(), tracks[0].Path)
+	assert(t, 1, len(tracks))
+	assert(t, params.SourceFilePath, tracks[0].Path)
 	assert(t, "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03", tracks[0].Hash)
-	assert(t, "100", fmt.Sprint(tracks[0].BPM))
+	assert(t, 100, tracks[0].BPM)
 }
 
 func TestRefresh(t *testing.T) {
-	dir, err := os.MkdirTemp(os.TempDir(), "mkcdj-analyze-*")
-	if err != nil {
-		t.Error(err)
-	}
-	defer os.RemoveAll(dir)
+	SUT, params, teardown := setup(t)
+	t.Cleanup(teardown)
 
-	fd, err := os.CreateTemp(dir, "mkcdj-analyze-source-*.flac")
-	if err != nil {
-		t.Error(err)
-	}
+	noerr(t, SUT.Refresh(context.Background()))
 
-	if _, err := fmt.Fprintln(fd, "hello"); err != nil {
-		t.Error(err)
-	}
-	defer fd.Close()
+	tracks := loadPlaylist(t, params.PlaylistFilePath)
 
-	track := mkcdj.Track{
-		Path:   fd.Name(),
-		Hash:   "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
-		BPM:    100,
-		Preset: mkcdj.Presets[0],
-	}
-
-	tracks := []mkcdj.Track{track}
-
-	payload, err := json.Marshal(tracks)
-	if err != nil {
-		t.Error(err)
-	}
-
-	repoPath := filepath.Join(os.TempDir(), "/mkcdj.json")
-	if err := os.WriteFile(repoPath, payload, 0666); err != nil {
-		t.Error(err)
-	}
-
-	SUT := mkcdj.New(
-		mkcdj.WithRepository(repoPath),
-		mkcdj.WithPipeline(mkcdj.Analyze, writeOk),
-		mkcdj.WithBPMScanFunc(stubBPMScanner),
-	)
-
-	ctx := context.Background()
-
-	if err := SUT.Refresh(ctx); err != nil {
-		t.Error(err)
-	}
-
-	tracks = make([]mkcdj.Track, 0)
-
-	data, err := os.ReadFile(repoPath)
-	if err != nil {
-		t.Error(err)
-	}
-
-	if err := json.Unmarshal(data, &tracks); err != nil {
-		t.Error(err)
-	}
-
-	assert(t, "1", fmt.Sprint(len(tracks)))
-	assert(t, fd.Name(), tracks[0].Path)
+	assert(t, 1, len(tracks))
+	assert(t, params.SourceFilePath, tracks[0].Path)
 	assert(t, "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03", tracks[0].Hash)
-	assert(t, "100", fmt.Sprint(tracks[0].BPM))
+	assert(t, 100, tracks[0].BPM)
 }
 
 func TestCompile(t *testing.T) {
-	dir, err := os.MkdirTemp(os.TempDir(), "mkcdj-compile-*")
-	if err != nil {
-		t.Error(err)
-	}
-	defer os.RemoveAll(dir)
+	SUT, params, teardown := setup(t)
+	t.Cleanup(teardown)
 
-	fd, err := os.CreateTemp(dir, "mkcdj-compile-source-*.flac")
-	if err != nil {
-		t.Error(err)
-	}
-	defer fd.Close()
+	noerr(t, SUT.Compile(context.Background(), params.OutDirPath))
 
-	if _, err := fmt.Fprintln(fd, "hello"); err != nil {
-		t.Error(err)
-	}
+	files := listFiles(t, params.OutDirPath)
 
-	track := mkcdj.Track{
+	t.Log(files)
+
+	base, ext := filepath.Base(params.SourceFilePath), filepath.Ext(params.SourceFilePath)
+
+	want := fmt.Sprintf("100 - %s", base[:len(base)-len(ext)])
+
+	assert(t, 3, len(files))
+	assert(t, want+".wav", filepath.Base(files[0]))
+	assert(t, "default", filepath.Base(filepath.Dir(files[0])))
+
+	checkFile(t, params.OutDirPath, filepath.Dir(files[0]), want+".wav")
+	checkFile(t, params.OutDirPath, filepath.Dir(files[1]), want+".png")
+	checkFile(t, params.OutDirPath, filepath.Dir(files[2]), want+".png")
+}
+
+type params struct {
+	SourceFilePath   string
+	OutDirPath       string
+	PlaylistFilePath string
+}
+
+func setup(t *testing.T) (*mkcdj.Playlist, params, func()) {
+	t.Helper()
+
+	dir, err := os.MkdirTemp(os.TempDir(), "mkcdj-*")
+	noerr(t, err)
+
+	fd, err := os.CreateTemp(dir, "mkcdj-source-*.flac")
+	noerr(t, err)
+	_, err = fmt.Fprintln(fd, "hello")
+	noerr(t, err)
+	noerr(t, fd.Close())
+
+	tracks := []mkcdj.Track{mkcdj.Track{
 		Path:   fd.Name(),
 		Hash:   "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
 		BPM:    100,
 		Preset: mkcdj.Presets[0],
-	}
-
-	tracks := []mkcdj.Track{track}
+	}}
 
 	payload, err := json.Marshal(tracks)
-	if err != nil {
-		t.Error(err)
-	}
+	noerr(t, err)
 
-	repoPath := filepath.Join(os.TempDir(), "/mkcdj.json")
-	if err := os.WriteFile(repoPath, payload, 0666); err != nil {
-		t.Error(err)
-	}
+	playlist := filepath.Join(os.TempDir(), "/mkcdj.json")
+	noerr(t, os.WriteFile(playlist, payload, 0666))
 
 	SUT := mkcdj.New(
-		mkcdj.WithRepository(repoPath),
+		mkcdj.WithRepository(playlist),
 		mkcdj.WithPipeline(mkcdj.Convert, writeOk),
+		mkcdj.WithPipeline(mkcdj.Analyze, writeOk),
 		mkcdj.WithPipeline(mkcdj.Waveform, writeOk),
 		mkcdj.WithPipeline(mkcdj.Spectrum, writeOk),
+		mkcdj.WithBPMScanFunc(stubBPMScanner),
 	)
 
-	if err := SUT.Compile(context.Background(), dir); err != nil {
-		t.Error(err)
+	res := params{
+		SourceFilePath:   fd.Name(),
+		OutDirPath:       dir,
+		PlaylistFilePath: playlist,
 	}
 
-	dirFS := os.DirFS(dir)
+	return SUT, res, func() { os.RemoveAll(dir) }
+}
 
-	files, err := fs.Glob(dirFS, "mkcdj-*/*/*/*")
+func loadPlaylist(t *testing.T, path string) []mkcdj.Track {
+	t.Helper()
+	tracks := make([]mkcdj.Track, 0)
+	data, err := os.ReadFile(path)
+	noerr(t, err)
+	noerr(t, json.Unmarshal(data, &tracks))
+	return tracks
+}
 
-	if err != nil {
-		t.Error(err)
-	}
-
-	t.Log(files)
-
-	base, ext := filepath.Base(fd.Name()), filepath.Ext(fd.Name())
-	want := fmt.Sprintf("100 - %s", base[:len(base)-len(ext)])
-
-	assert(t, "3", fmt.Sprint(len(files)))
-	assert(t, want+".wav", filepath.Base(files[0]))
-	assert(t, "default", filepath.Base(filepath.Dir(files[0])))
-
-	checkFile(t, dir, filepath.Dir(files[0]), want+".wav")
-	checkFile(t, dir, filepath.Dir(files[1]), want+".png")
-	checkFile(t, dir, filepath.Dir(files[2]), want+".png")
+func listFiles(t *testing.T, path string) []string {
+	files, err := fs.Glob(os.DirFS(path), "mkcdj-*/*/*/*")
+	noerr(t, err)
+	return files
 }
 
 func checkFile(t *testing.T, components ...string) {
+	t.Helper()
 	content, err := os.ReadFile(filepath.Join(components...))
-	if err != nil {
-		t.Error(err)
-	}
+	noerr(t, err)
 	assert(t, "ok", strings.TrimSpace(string(content)))
 }
 
-func assert(t *testing.T, want, got string) {
+func assert[T comparable](t *testing.T, want, got T) {
+	t.Helper()
 	if want != got {
-		t.Errorf("want: %s, got: %s", want, got)
+		t.Errorf("want: %v, got: %v", want, got)
+	}
+}
+
+func noerr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -224,24 +210,3 @@ func stubCmd(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) err
 }
 
 func stubBPMScanner(r io.Reader, min, max float64) (float64, error) { return 100, nil }
-
-func TestSerializaton(t *testing.T) {
-	data := `[{"path":"/foo","hash":"bar","preset":"dnb","bpm":100}]`
-
-	var tracks []mkcdj.Track
-	if err := json.Unmarshal([]byte(data), &tracks); err != nil {
-		t.Error(err)
-	}
-
-	assert(t, "/foo", tracks[0].Path)
-	assert(t, "bar", tracks[0].Hash)
-	assert(t, "dnb", tracks[0].Preset.Name)
-	assert(t, "100", fmt.Sprint(tracks[0].BPM))
-
-	got, err := json.Marshal(&tracks)
-	if err != nil {
-		t.Error(err)
-	}
-
-	assert(t, data, string(got))
-}

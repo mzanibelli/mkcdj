@@ -64,25 +64,11 @@ func analyze(ctx context.Context, preset, path string) error {
 	}
 }
 
-func compile(ctx context.Context, path string) error {
-	return mkcdj.New(opts[:]...).Compile(ctx, path)
-}
-
-func refresh(ctx context.Context) error {
-	return mkcdj.New(opts[:]...).Refresh(ctx)
-}
-
-func list(out io.Writer) error {
-	return mkcdj.New(repo).List(out)
-}
-
-func files(out io.Writer) error {
-	return mkcdj.New(repo).Files(out)
-}
-
-func prune() error {
-	return mkcdj.New(repo).Prune()
-}
+func compile(ctx context.Context, path string) error { return mkcdj.New(opts[:]...).Compile(ctx, path) }
+func refresh(ctx context.Context) error              { return mkcdj.New(opts[:]...).Refresh(ctx) }
+func list(out io.Writer) error                       { return mkcdj.New(repo).List(out) }
+func files(out io.Writer) error                      { return mkcdj.New(repo).Files(out) }
+func prune() error                                   { return mkcdj.New(repo).Prune() }
 
 const help string = `invalid parameters
 usage:
