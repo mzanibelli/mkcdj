@@ -65,8 +65,7 @@ func TestSerialization(t *testing.T) {
 }
 
 func TestAnalyze(t *testing.T) {
-	SUT, params, teardown := setup(t)
-	t.Cleanup(teardown)
+	SUT, params := setup(t)
 
 	// Do the analysis twice to check duplication.
 	noerr(t, SUT.Analyze(context.Background(), params.SourceFilePath, mkcdj.Presets[0]))
@@ -81,8 +80,7 @@ func TestAnalyze(t *testing.T) {
 }
 
 func TestRefresh(t *testing.T) {
-	SUT, params, teardown := setup(t)
-	t.Cleanup(teardown)
+	SUT, params := setup(t)
 
 	noerr(t, SUT.Refresh(context.Background()))
 
@@ -95,8 +93,7 @@ func TestRefresh(t *testing.T) {
 }
 
 func TestCompile(t *testing.T) {
-	SUT, params, teardown := setup(t)
-	t.Cleanup(teardown)
+	SUT, params := setup(t)
 
 	noerr(t, SUT.Compile(context.Background(), params.OutDirPath))
 
@@ -123,20 +120,15 @@ type params struct {
 	PlaylistFilePath string
 }
 
-func setup(t *testing.T) (*mkcdj.Playlist, params, func()) {
+func setup(t *testing.T) (*mkcdj.Playlist, params) {
 	t.Helper()
 
-	dir, err := os.MkdirTemp(os.TempDir(), "mkcdj-*")
-	noerr(t, err)
-
-	fd, err := os.CreateTemp(dir, "mkcdj-source-*.flac")
-	noerr(t, err)
-	_, err = fmt.Fprintln(fd, "hello")
-	noerr(t, err)
-	noerr(t, fd.Close())
+	dir := t.TempDir()
+	source := filepath.Join(dir, "mkcdj-source.flac")
+	noerr(t, os.WriteFile(source, []byte("hello\n"), 0666))
 
 	tracks := []mkcdj.Track{{
-		Path:   fd.Name(),
+		Path:   source,
 		Hash:   "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
 		BPM:    100,
 		Preset: mkcdj.Presets[0],
@@ -158,12 +150,12 @@ func setup(t *testing.T) (*mkcdj.Playlist, params, func()) {
 	)
 
 	res := params{
-		SourceFilePath:   fd.Name(),
+		SourceFilePath:   source,
 		OutDirPath:       dir,
 		PlaylistFilePath: playlist,
 	}
 
-	return SUT, res, func() { os.RemoveAll(dir) }
+	return SUT, res
 }
 
 func loadPlaylist(t *testing.T, path string) []mkcdj.Track {
@@ -176,6 +168,7 @@ func loadPlaylist(t *testing.T, path string) []mkcdj.Track {
 }
 
 func listFiles(t *testing.T, path string) []string {
+	t.Helper()
 	files, err := fs.Glob(os.DirFS(path), "mkcdj-*/*/*/*")
 	noerr(t, err)
 	return files
@@ -209,4 +202,6 @@ func stubCmd(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) err
 	return err
 }
 
-func stubBPMScanner(r io.Reader, min, max float64) (float64, error) { return 100, nil }
+func stubBPMScanner(r io.Reader, min, max float64) (float64, error) {
+	return 100, nil
+}
